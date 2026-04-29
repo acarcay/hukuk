@@ -1,0 +1,27 @@
+# PDF extraction
+PyMuPDF>=1.24.0
+
+# DOCX extraction
+python-docx>=1.1.0
+
+# RTF extraction
+striprtf>=0.0.26
+
+# OCR for scanned documents
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# Data validation
+pydantic>=2.0.0
+
+# Embedding model
+sentence-transformers>=2.2.0
+
+# Vector store
+chromadb>=0.4.0
+
+# API server
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+httpx>=0.24.0
+python-multipart>=0.0.6
