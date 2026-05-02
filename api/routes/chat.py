@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -33,8 +33,8 @@ class ChatRequest(BaseModel):
     """Incoming chat request."""
 
     query: str = Field(..., min_length=1, max_length=2000, description="User question")
-    source_filter: Optional[str] = Field(
-        None, description="Filter results to a specific document (source_id)"
+    source_filter: Optional[Union[str, List[str]]] = Field(
+        None, description="Filter results to specific document(s) (source_id)"
     )
     top_k: Optional[int] = Field(
         None, ge=1, le=20, description="Number of context chunks to retrieve"
@@ -74,7 +74,7 @@ class ChatResponse(BaseModel):
 def _retrieve_context(
     query: str,
     top_k: int,
-    source_filter: Optional[str],
+    source_filter: Optional[Union[str, List[str]]],
 ) -> List[Dict]:
     """
     Synchronous context retrieval from ChromaDB.
@@ -301,3 +301,26 @@ async def list_documents():
         "total_vectors": services.store.count,
         "documents": list(sources.values()),
     }
+@router.delete(
+    "/documents/{source_id}",
+    summary="Delete a document and its vectors",
+    tags=["Documents"],
+)
+async def delete_document(source_id: str):
+    """Remove a document from the vector store and delete its source file."""
+    # 1. Delete from ChromaDB
+    try:
+        services.store.delete_by_source(source_id)
+    except Exception as exc:
+        logger.error("Failed to delete vectors for %s: %s", source_id, exc)
+
+    # 2. Delete file from disk
+    file_path = Path(settings.UPLOAD_DIR) / source_id
+    if file_path.exists():
+        try:
+            file_path.unlink()
+            logger.info("Deleted file: %s", file_path)
+        except OSError as exc:
+            logger.error("Failed to delete file %s: %s", file_path, exc)
+
+    return {"status": "success", "message": f"Document {source_id} deleted."}

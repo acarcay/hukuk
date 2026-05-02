@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
+import '../screens/pdf_viewer_screen.dart';
 
 /// Elegant citation/source card displayed below AI messages.
 /// Shows which document and section the answer was derived from.
@@ -29,16 +30,19 @@ class CitationCard extends StatelessWidget {
               color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
             ),
             const SizedBox(width: 6),
-            Text(
-              'KAYNAKLAR / SOURCES',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    letterSpacing: 1.2,
-                    color: isDark
-                        ? AppColors.textMuted
-                        : AppColors.lightTextSecondary,
-                  ),
+            Expanded(
+              child: Text(
+                'KAYNAKLAR / SOURCES',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      letterSpacing: 1.2,
+                      color: isDark
+                          ? AppColors.textMuted
+                          : AppColors.lightTextSecondary,
+                    ),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            const Spacer(),
+            const SizedBox(width: 8),
             Text(
               '${citations.length} kaynak',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -102,7 +106,7 @@ class _CitationChipState extends State<_CitationChip> {
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeInOut,
         constraints: BoxConstraints(
-          maxWidth: _expanded ? 500 : 280,
+          maxWidth: _expanded ? double.infinity : 280,
         ),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -147,7 +151,7 @@ class _CitationChipState extends State<_CitationChip> {
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
-                    c.sourceId,
+                    _cleanFileName(c.sourceId),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: widget.isDark
@@ -227,6 +231,31 @@ class _CitationChipState extends State<_CitationChip> {
                       ),
                 ),
               ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => PdfViewerScreen(
+                          sourceId: c.sourceId,
+                          pageNumber: c.pageNumber,
+                          searchText: c.text,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.open_in_new, size: 14),
+                  label: const Text('Belgeye Git'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
             ],
             // Expand indicator
             if (!_expanded) ...[
@@ -271,5 +300,15 @@ class _CitationChipState extends State<_CitationChip> {
     if (pct >= 80) return AppColors.success;
     if (pct >= 60) return AppColors.accent;
     return AppColors.error;
+  }
+
+  String _cleanFileName(String name) {
+    if (name.contains('_')) {
+      final parts = name.split('_');
+      if (parts.first.length == 8) {
+        return parts.skip(1).join('_');
+      }
+    }
+    return name;
   }
 }

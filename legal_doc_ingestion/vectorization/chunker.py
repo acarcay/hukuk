@@ -38,6 +38,7 @@ class TextChunk:
     total_chunks: int = 0
     section_heading: Optional[str] = None
     char_count: int = 0
+    page_number: int = 1
     metadata: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -129,6 +130,7 @@ class LegalSemanticChunker:
         text: str,
         source_id: str = "",
         extra_metadata: Optional[Dict[str, str]] = None,
+        page_boundaries: Optional[List[tuple[int, int]]] = None,
     ) -> List[TextChunk]:
         """
         Split *text* into semantic chunks.
@@ -141,6 +143,9 @@ class LegalSemanticChunker:
             Identifier for the source document (e.g. filename).
         extra_metadata
             Arbitrary key-value pairs attached to every chunk.
+        page_boundaries
+            List of tuples `(cumulative_char_count, page_number)`.
+            Used to determine which page a chunk belongs to.
 
         Returns
         -------
@@ -171,6 +176,21 @@ class LegalSemanticChunker:
             chunk_text = body.strip()
             if not chunk_text:
                 continue
+
+            # Determine page number if boundaries are provided
+            page_num = 1
+            if page_boundaries:
+                # Find approximate start index in original text
+                search_len = min(100, len(chunk_text))
+                start_idx = text.find(chunk_text[:search_len])
+                if start_idx != -1:
+                    for threshold, p_num in page_boundaries:
+                        if start_idx < threshold:
+                            page_num = p_num
+                            break
+                    else:
+                        page_num = page_boundaries[-1][1]
+
             chunks.append(
                 TextChunk(
                     chunk_id=self._deterministic_id(source_id, idx),
@@ -179,6 +199,7 @@ class LegalSemanticChunker:
                     chunk_index=idx,
                     total_chunks=total,
                     section_heading=heading,
+                    page_number=page_num,
                     metadata=dict(meta),
                 )
             )

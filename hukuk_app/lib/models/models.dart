@@ -4,12 +4,14 @@ class Citation {
   final String? sectionHeading;
   final String text;
   final double distance;
+  final int pageNumber;
 
   const Citation({
     required this.sourceId,
     this.sectionHeading,
     required this.text,
     required this.distance,
+    this.pageNumber = 1,
   });
 
   factory Citation.fromJson(Map<String, dynamic> json) {
@@ -18,6 +20,7 @@ class Citation {
       sectionHeading: json['section_heading'] as String?,
       text: json['text'] as String? ?? '',
       distance: (json['distance'] as num?)?.toDouble() ?? 0.0,
+      pageNumber: json['page_number'] as int? ?? 1,
     );
   }
 

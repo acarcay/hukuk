@@ -139,7 +139,7 @@ class AppTheme {
         titleTextStyle: textTheme.titleLarge,
         iconTheme: const IconThemeData(color: AppColors.textSecondary),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: AppColors.darkCard,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -228,7 +228,7 @@ class AppTheme {
         titleTextStyle: textTheme.titleLarge,
         iconTheme: const IconThemeData(color: AppColors.lightTextSecondary),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: AppColors.lightCard,
         elevation: 0,
         shape: RoundedRectangleBorder(

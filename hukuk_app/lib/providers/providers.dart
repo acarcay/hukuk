@@ -154,7 +154,18 @@ class ChatController {
       double? retrievalMs;
       double? generationMs;
 
-      await for (final event in api.chatStream(query: query)) {
+      final allDocs = _ref.read(documentsProvider).value ?? [];
+      final deselectedDocs = _ref.read(deselectedDocumentsProvider);
+      
+      final activeSources = allDocs
+          .map((d) => d['source_id'] as String)
+          .where((id) => !deselectedDocs.contains(id))
+          .toList();
+
+      await for (final event in api.chatStream(
+        query: query,
+        sourceFilter: activeSources.isEmpty ? null : activeSources,
+      )) {
         switch (event.event) {
           case 'context':
             final chunks = event.data['chunks'] as List<dynamic>? ?? [];
@@ -264,5 +275,39 @@ class UploadNotifier extends StateNotifier<UploadState> {
 
   void reset() {
     state = const UploadState();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Documents state
+// ---------------------------------------------------------------------------
+
+final documentsProvider = FutureProvider<List<dynamic>>((ref) async {
+  final api = ref.read(apiServiceProvider);
+  final response = await api.listDocuments();
+  return response['documents'] as List<dynamic>? ?? [];
+});
+
+final deselectedDocumentsProvider = StateProvider<List<String>>((ref) => []);
+
+final documentControllerProvider = Provider<DocumentController>((ref) {
+  return DocumentController(ref);
+});
+
+class DocumentController {
+  final Ref _ref;
+  DocumentController(this._ref);
+
+  Future<void> deleteDocument(String sourceId) async {
+    final api = _ref.read(apiServiceProvider);
+    await api.deleteDocument(sourceId);
+    
+    // Refresh the documents list
+    _ref.invalidate(documentsProvider);
+    
+    // Also remove from deselected list if it was there
+    _ref.read(deselectedDocumentsProvider.notifier).update(
+      (list) => list.where((id) => id != sourceId).toList(),
+    );
   }
 }

@@ -7,6 +7,7 @@ import '../widgets/chat_input.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/upload_dialog.dart';
+import '../widgets/documents_dialog.dart';
 
 /// Main chat screen — sidebar + chat window (responsive layout).
 class ChatScreen extends ConsumerStatefulWidget {
@@ -133,6 +134,15 @@ class _ChatAppBar extends ConsumerWidget {
                   ),
               overflow: TextOverflow.ellipsis,
             ),
+          ),
+          // View documents button
+          IconButton(
+            onPressed: () {
+              ref.refresh(documentsProvider); // refresh before showing
+              DocumentsDialog.show(context);
+            },
+            icon: const Icon(Icons.folder_outlined, size: 22),
+            tooltip: 'Sistemdeki Belgeler',
           ),
           // Status indicator
           _ConnectionStatus(),

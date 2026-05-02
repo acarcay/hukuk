@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.env
+
+# ChromaDB & Document Storage (Local Data)
+chroma_db/
+uploads/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Flutter / Dart
+hukuk_app/.dart_tool/
+hukuk_app/.flutter-plugins
+hukuk_app/.flutter-plugins-dependencies
+hukuk_app/.pub-cache/
+hukuk_app/.pub/
+hukuk_app/build/
+hukuk_app/ios/Pods/
+hukuk_app/macos/Pods/
+hukuk_app/linux/flutter/ephemeral/
+hukuk_app/windows/flutter/ephemeral/
+
+# Logs
+*.log
+logs/

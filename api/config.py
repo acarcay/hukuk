@@ -45,12 +45,12 @@ class Settings:
 
     # -- LLM (Ollama) --
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3:8b")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
     OLLAMA_TIMEOUT: int = int(os.getenv("OLLAMA_TIMEOUT", "120"))
 
     # -- RAG --
-    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "5"))
-    RAG_MAX_CONTEXT_CHARS: int = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "6000"))
+    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))
+    RAG_MAX_CONTEXT_CHARS: int = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "16000"))
 
 
 settings = Settings()

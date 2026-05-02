@@ -39,37 +39,46 @@ class MessageBubble extends StatelessWidget {
               children: [
                 // Role label
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.only(bottom: 6, left: 4, right: 4),
                   child: Text(
-                    isUser ? 'Siz' : 'Hukuk AI',
+                    isUser ? 'SİZ' : 'HUKUK ASİSTANI',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          fontSize: 10,
+                          letterSpacing: 1.1,
                           color: isUser
                               ? AppColors.accent
                               : (isDark
                                   ? AppColors.textMuted
                                   : AppColors.lightTextSecondary),
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                         ),
                   ),
                 ),
                 // Message content
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: isUser
-                        ? AppColors.accent.withOpacity(isDark ? 0.12 : 0.08)
+                        ? AppColors.accent.withOpacity(isDark ? 0.15 : 0.08)
                         : (isDark
                             ? AppColors.darkCard
                             : AppColors.lightCard),
                     borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: Radius.circular(isUser ? 16 : 4),
-                      bottomRight: Radius.circular(isUser ? 4 : 16),
+                      topLeft: const Radius.circular(20),
+                      topRight: const Radius.circular(20),
+                      bottomLeft: Radius.circular(isUser ? 20 : 4),
+                      bottomRight: Radius.circular(isUser ? 4 : 20),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                     border: Border.all(
                       color: isUser
-                          ? AppColors.accent.withOpacity(0.2)
+                          ? AppColors.accent.withOpacity(0.3)
                           : (isDark
                               ? AppColors.darkBorder
                               : AppColors.lightBorder),
@@ -78,6 +87,7 @@ class MessageBubble extends StatelessWidget {
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       // Message text (markdown for assistant)
                       if (isUser)
@@ -90,19 +100,23 @@ class MessageBubble extends StatelessWidget {
 
                       // Streaming indicator
                       if (message.isStreaming) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 12),
                         _StreamingIndicator(isDark: isDark),
                       ],
 
                       // Citations
-                      if (!isUser && message.citations.isNotEmpty)
+                      if (!isUser && message.citations.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        const Divider(height: 1),
+                        const SizedBox(height: 16),
                         CitationCard(citations: message.citations),
+                      ],
 
                       // Timing metadata
                       if (!isUser &&
                           !message.isStreaming &&
                           message.retrievalTimeMs != null) ...[
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 12),
                         _TimingInfo(message: message, isDark: isDark),
                       ],
                     ],

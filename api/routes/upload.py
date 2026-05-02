@@ -82,6 +82,13 @@ def _process_document(filepath: Path) -> Dict:
     result = services.ingestor.ingest(filepath)
     cleaned_text = result.full_cleaned_text()
 
+    # Calculate page boundaries
+    page_boundaries = []
+    current_len = 0
+    for p in result.pages:
+        current_len += len(p.cleaned_text) + 2  # +2 for "\n\n" separator
+        page_boundaries.append((current_len, p.page_number))
+
     # Step 2: Semantic chunking
     source_id = result.metadata.filename
     chunks = services.chunker.chunk(
@@ -91,6 +98,7 @@ def _process_document(filepath: Path) -> Dict:
             "document_type": result.metadata.document_type.value,
             "total_pages": str(result.metadata.total_pages),
         },
+        page_boundaries=page_boundaries,
     )
 
     # Step 3: Embed + store in ChromaDB
@@ -184,12 +192,7 @@ async def upload_documents(
                 )
             )
         finally:
-            # Clean up temp file
-            if filepath.exists():
-                try:
-                    filepath.unlink()
-                except OSError:
-                    pass
+            pass
 
     return UploadResponse(
         message=f"Processed {len(results)} document(s).",

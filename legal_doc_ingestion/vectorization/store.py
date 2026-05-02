@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from legal_doc_ingestion.vectorization.chunker import TextChunk
 
@@ -41,6 +41,7 @@ class SearchResult:
     distance: float
     source_id: str = ""
     section_heading: Optional[str] = None
+    page_number: int = 1
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -137,6 +138,7 @@ class ChromaVectorStore:
                 "chunk_index": chunk.chunk_index,
                 "total_chunks": chunk.total_chunks,
                 "char_count": chunk.char_count,
+                "page_number": chunk.page_number,
             }
             if chunk.section_heading:
                 meta["section_heading"] = chunk.section_heading
@@ -170,7 +172,7 @@ class ChromaVectorStore:
         *,
         k: int = 5,
         where: Optional[Dict[str, Any]] = None,
-        source_filter: Optional[str] = None,
+        source_filter: Optional[Union[str, List[str]]] = None,
     ) -> List[SearchResult]:
         """
         Perform k-NN similarity search.
@@ -185,7 +187,7 @@ class ChromaVectorStore:
             Number of nearest neighbors to return.
         where : dict, optional
             ChromaDB metadata filter (e.g. ``{"source_id": "contract.pdf"}``).
-        source_filter : str, optional
+        source_filter : str or list[str], optional
             Shorthand to filter by source_id.
 
         Returns
@@ -200,7 +202,13 @@ class ChromaVectorStore:
         # Build filter
         chroma_where = where
         if source_filter and not chroma_where:
-            chroma_where = {"source_id": source_filter}
+            if isinstance(source_filter, list):
+                if len(source_filter) == 1:
+                    chroma_where = {"source_id": source_filter[0]}
+                else:
+                    chroma_where = {"source_id": {"$in": source_filter}}
+            else:
+                chroma_where = {"source_id": source_filter}
 
         kwargs: Dict[str, Any] = {
             "query_embeddings": [query_embedding],
@@ -223,6 +231,7 @@ class ChromaVectorStore:
                         distance=raw["distances"][0][i] if raw["distances"] else 0.0,
                         source_id=meta.get("source_id", ""),
                         section_heading=meta.get("section_heading"),
+                        page_number=meta.get("page_number", 1),
                         metadata=meta,
                     )
                 )

@@ -60,7 +60,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> chat({
     required String query,
-    String? sourceFilter,
+    List<String>? sourceFilter,
     int? topK,
     double? temperature,
     String? language,
@@ -69,7 +69,9 @@ class ApiService {
       'query': query,
       'stream': false,
     };
-    if (sourceFilter != null) body['source_filter'] = sourceFilter;
+    if (sourceFilter != null && sourceFilter.isNotEmpty) {
+      body['source_filter'] = sourceFilter;
+    }
     if (topK != null) body['top_k'] = topK;
     if (temperature != null) body['temperature'] = temperature;
     if (language != null) body['language'] = language;
@@ -94,7 +96,7 @@ class ApiService {
   /// Each event is a Map with keys: 'event' (string) and 'data' (parsed JSON).
   Stream<SseEvent> chatStream({
     required String query,
-    String? sourceFilter,
+    List<String>? sourceFilter,
     int? topK,
     double? temperature,
     String? language,
@@ -103,7 +105,9 @@ class ApiService {
       'query': query,
       'stream': true,
     };
-    if (sourceFilter != null) body['source_filter'] = sourceFilter;
+    if (sourceFilter != null && sourceFilter.isNotEmpty) {
+      body['source_filter'] = sourceFilter;
+    }
     if (topK != null) body['top_k'] = topK;
     if (temperature != null) body['temperature'] = temperature;
     if (language != null) body['language'] = language;
@@ -158,6 +162,15 @@ class ApiService {
       return jsonDecode(resp.body) as Map<String, dynamic>;
     }
     throw ApiException('Failed to list documents', resp.statusCode);
+  }
+
+  Future<void> deleteDocument(String sourceId) async {
+    final resp = await _client.delete(
+      Uri.parse('$baseUrl/api/v1/documents/$sourceId'),
+    );
+    if (resp.statusCode != 200) {
+      throw ApiException(_extractError(resp.body), resp.statusCode);
+    }
   }
 
   // ------------------------------------------------------------------

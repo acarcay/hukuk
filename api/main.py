@@ -165,9 +165,15 @@ async def log_requests(request: Request, call_next):
 from api.routes.upload import router as upload_router  # noqa: E402
 from api.routes.chat import router as chat_router      # noqa: E402
 
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+
 app.include_router(upload_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 
+# Mount uploads directory for PDF retrieval
+Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+app.mount("/api/v1/documents/files", StaticFiles(directory=settings.UPLOAD_DIR), name="documents_files")
 
 # ------------------------------------------------------------------
 # Health / status
