@@ -45,13 +45,28 @@ class MockStore:
                 "text": c.text,
                 "source_id": c.source_id,
                 "section_heading": c.section_heading,
+                "disk_filename": c.metadata.get("disk_filename", c.source_id),
             })
         return len(chunks)
 
+    def delete_by_source(self, source_id: str) -> None:
+        removed = [d for d in self._docs if d["source_id"] == source_id]
+        self._docs = [d for d in self._docs if d["source_id"] != source_id]
+        self._count -= len(removed)
+        if self._count < 0:
+            self._count = 0
+
     def search(self, query, engine, k=5, **kwargs):
         from legal_doc_ingestion.vectorization.store import SearchResult
+        source_filter = kwargs.get("source_filter")
+        docs = self._docs
+        if source_filter:
+            if isinstance(source_filter, list):
+                docs = [d for d in docs if d["source_id"] in source_filter]
+            else:
+                docs = [d for d in docs if d["source_id"] == source_filter]
         results = []
-        for doc in self._docs[:k]:
+        for doc in docs[:k]:
             results.append(SearchResult(
                 chunk_id="mock_id",
                 text=doc["text"],
@@ -61,17 +76,24 @@ class MockStore:
                 metadata={
                     "source_id": doc.get("source_id", "test.pdf"),
                     "section_heading": doc.get("section_heading"),
+                    "disk_filename": doc.get("disk_filename", ""),
                 },
             ))
         return results
 
     def _get_collection(self):
         mock_collection = MagicMock()
+        mock_collection.count.return_value = self._count
         mock_collection.get.return_value = {
+            "ids": [f"id_{i}" for i in range(len(self._docs))],
             "metadatas": [
-                {"source_id": "test.pdf", "document_type": "pdf"}
-                for _ in range(self._count)
-            ]
+                {
+                    "source_id": d["source_id"],
+                    "document_type": "pdf",
+                    "disk_filename": d.get("disk_filename", d["source_id"]),
+                }
+                for d in self._docs
+            ],
         }
         return mock_collection
 
@@ -318,3 +340,143 @@ class TestDocumentsEndpoint:
         resp = client.get("/api/v1/documents")
         assert resp.status_code == 200
         assert resp.json()["total_vectors"] == 2
+
+    def test_delete_document(self, client, mock_services):
+        """DELETE /api/v1/documents/{source_id} vektörleri siler."""
+        from legal_doc_ingestion.vectorization.chunker import TextChunk
+        chunks = [
+            TextChunk(chunk_id="x1", text="Kira sözleşmesi", source_id="kira.pdf"),
+            TextChunk(chunk_id="x2", text="Ödeme şartları", source_id="kira.pdf"),
+        ]
+        mock_services.store.insert_chunks(chunks, mock_services.embedder)
+        assert mock_services.store.count == 2
+
+        resp = client.delete("/api/v1/documents/kira.pdf")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "success"
+        assert mock_services.store.count == 0
+
+    def test_delete_nonexistent_document_still_200(self, client):
+        """Olmayan bir source_id için DELETE yine de 200 dönmeli (idempotent)."""
+        resp = client.delete("/api/v1/documents/hayalet.pdf")
+        assert resp.status_code == 200
+
+
+# ------------------------------------------------------------------
+# Upload güvenlik & yeniden yükleme testleri
+# ------------------------------------------------------------------
+
+class TestUploadSecurity:
+
+    def test_upload_rejects_oversized_file(self, client, mock_services):
+        """MAX_UPLOAD_SIZE_MB sınırını aşan dosya 413 döndürmeli."""
+        from api.config import settings
+        import tempfile
+
+        # Limit'i geçici olarak 0 MB yap
+        original = settings.MAX_UPLOAD_SIZE_MB
+        settings.MAX_UPLOAD_SIZE_MB = 0
+        try:
+            content = b"PDF content that is definitely > 0 MB"
+            resp = client.post(
+                "/api/v1/upload",
+                files=[("files", ("test.pdf", io.BytesIO(content), "application/pdf"))],
+            )
+            assert resp.status_code == 413
+        finally:
+            settings.MAX_UPLOAD_SIZE_MB = original
+
+    def test_upload_rejects_txt_extension(self, client):
+        """Desteklenmeyen format 400 döndürmeli."""
+        resp = client.post(
+            "/api/v1/upload",
+            files=[("files", ("notes.txt", io.BytesIO(b"some text"), "text/plain"))],
+        )
+        assert resp.status_code == 400
+        assert "Unsupported" in resp.json()["detail"]
+
+    def test_upload_rejects_empty_filename(self, client):
+        """Dosya listesi boş gönderilince 422 döndürmeli."""
+        resp = client.post("/api/v1/upload")
+        assert resp.status_code == 422
+
+
+class TestReUploadBehavior:
+    """Aynı kaynak belgenin yeniden yüklenmesi eski chunk'ları temizlemeli."""
+
+    def test_reupload_clears_stale_chunks(self, client, mock_services, tmp_path):
+        """
+        Bug 4 regresyon testi:
+        İlk yükleme → 3 chunk; ikinci yükleme (farklı içerik) → 2 chunk.
+        İkinci yüklemeden sonra store'da toplam 2 chunk olmalı (3 değil).
+        """
+        try:
+            from docx import Document as DocxDocument
+        except ImportError:
+            pytest.skip("python-docx not installed")
+
+        def make_docx(paragraphs):
+            doc = DocxDocument()
+            for p in paragraphs:
+                doc.add_paragraph(p)
+            path = tmp_path / f"contract_{len(paragraphs)}.docx"
+            doc.save(str(path))
+            return path.read_bytes()
+
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+        # İlk yükleme
+        content_v1 = make_docx([
+            "MADDE 1 - Taraflar", "Kiracı: Ahmet",
+            "MADDE 2 - Konu", "Kiralık daire",
+            "MADDE 3 - Ödeme", "15.000 TL",
+        ])
+        resp1 = client.post(
+            "/api/v1/upload",
+            files=[("files", ("sozlesme.docx", io.BytesIO(content_v1), mime))],
+        )
+        assert resp1.status_code == 200
+        chunks_v1 = resp1.json()["total_chunks"]
+        assert chunks_v1 > 0
+
+        # İkinci yükleme (aynı dosya adı, daha az madde)
+        content_v2 = make_docx([
+            "MADDE 1 - Taraflar", "Kiracı: Mehmet",
+            "MADDE 2 - Konu", "Ofis kirası",
+        ])
+        resp2 = client.post(
+            "/api/v1/upload",
+            files=[("files", ("sozlesme.docx", io.BytesIO(content_v2), mime))],
+        )
+        assert resp2.status_code == 200
+        chunks_v2 = resp2.json()["total_chunks"]
+        assert chunks_v2 > 0
+
+        count_after_v2 = mock_services.store.count
+        # Yeniden yükleme önce delete_by_source çağırmalı,
+        # bu yüzden v1 chunk'ları temizlenmeli ve sadece v2 chunk'ları kalmalı
+        assert count_after_v2 == chunks_v2, (
+            f"Stale chunk'lar temizlenmemiş: store'da {count_after_v2} var, "
+            f"beklenen {chunks_v2}"
+        )
+
+
+# ------------------------------------------------------------------
+# Health endpoint edge cases
+# ------------------------------------------------------------------
+
+class TestHealthEdgeCases:
+
+    def test_health_includes_vector_count(self, client, mock_services):
+        """Health endpoint vector_store bilgisi içermeli."""
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "vector_store" in data
+        assert "llm" in data
+        assert "status" in data
+
+    def test_request_id_propagated_in_response(self, client):
+        """X-Request-ID header'ı response'a yansımalı."""
+        resp = client.get("/health", headers={"X-Request-ID": "test-123"})
+        assert resp.headers.get("X-Request-ID") == "test-123"

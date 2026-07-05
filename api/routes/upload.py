@@ -73,24 +73,31 @@ def _validate_extension(filename: str) -> str:
     return ext
 
 
-def _process_document(filepath: Path, disk_filename: str) -> Dict:
+def _process_document(filepath: Path, disk_filename: str, original_filename: str) -> Dict:
     """
     Synchronous pipeline: ingest → chunk → embed → store.
     Called inside a thread pool to avoid blocking the event loop.
 
     ``disk_filename`` is the actual filename on disk (uuid-prefixed),
     stored as metadata so ``delete_document`` can locate the physical file.
+
+    ``original_filename`` is the user-supplied filename; it is used as
+    ``source_id`` so that re-uploads with the same name correctly replace
+    the previous version (delete_by_source + re-insert).
     """
     # Step 1: Ingest (parse + clean)
     result = services.ingestor.ingest(filepath)
     cleaned_text = result.full_cleaned_text()
+
+    # source_id is the *original* filename — NOT the uuid-prefixed disk name.
+    # This ensures delete_by_source(source_id) on re-upload finds the right chunks.
+    source_id = original_filename
 
     # Step 1b: Remove any previously indexed chunks for this source so that
     # re-uploads of the same filename don't leave orphaned (stale) chunks.
     # Without this, upsert only overwrites chunks with the same chunk_id; if
     # the new version has *fewer* chunks, the extras from the old version
     # survive and contaminate search results with outdated legal text.
-    source_id = result.metadata.filename
     try:
         services.store.delete_by_source(source_id)
     except Exception:
@@ -186,7 +193,7 @@ async def upload_documents(
 
             # Run CPU-heavy pipeline in thread pool
             doc_result = await loop.run_in_executor(
-                None, _process_document, filepath, safe_name
+                None, _process_document, filepath, safe_name, filename
             )
 
             results.append(UploadResult(**{k: v for k, v in doc_result.items() if k != "disk_filename"}))

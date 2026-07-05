@@ -333,3 +333,125 @@ class TestExceptionHierarchy:
         exc = CorruptedFileError("/tmp/bad.pdf", reason="magic bytes invalid")
         assert exc.filepath == "/tmp/bad.pdf"
         assert "magic bytes invalid" in str(exc)
+
+
+# ======================================================================
+# DOCX Tablo Desteği (Bug 10 regresyon)
+# ======================================================================
+
+
+class TestDocxTableParsing:
+    """DOCX içindeki tablolar ingestion'da görünmeli."""
+
+    def test_table_content_included(self) -> None:
+        try:
+            from docx import Document as DocxDocument
+        except ImportError:
+            pytest.skip("python-docx not installed")
+
+        doc = DocxDocument()
+        doc.add_paragraph("MADDE 1 - Taraflar")
+        doc.add_paragraph("Bu sözleşme aşağıdaki taraflar arasında imzalanmıştır.")
+
+        # Taraf bilgileri tablosu (sözleşmelerde çok yaygın)
+        table = doc.add_table(rows=3, cols=2)
+        table.cell(0, 0).text = "Unvan"
+        table.cell(0, 1).text = "Ad Soyad"
+        table.cell(1, 0).text = "Kiralayan"
+        table.cell(1, 1).text = "Mehmet Yılmaz"
+        table.cell(2, 0).text = "Kiracı"
+        table.cell(2, 1).text = "Ayşe Demir"
+
+        doc.add_paragraph("MADDE 2 - Ödeme")
+        doc.add_paragraph("Kira bedeli aşağıdaki tabloda belirtilmiştir.")
+
+        # Ödeme planı tablosu
+        ptable = doc.add_table(rows=2, cols=3)
+        ptable.cell(0, 0).text = "Ay"
+        ptable.cell(0, 1).text = "Tutar"
+        ptable.cell(0, 2).text = "Vade"
+        ptable.cell(1, 0).text = "Ocak 2026"
+        ptable.cell(1, 1).text = "15.000 TL"
+        ptable.cell(1, 2).text = "05.01.2026"
+
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+            doc.save(f.name)
+            path = f.name
+
+        try:
+            ingestor = LegalDocumentIngestor()
+            result = ingestor.ingest(path)
+            full_text = result.full_cleaned_text()
+
+            # Tablo içeriği metne dahil olmalı
+            assert "Mehmet Yılmaz" in full_text, "Kiralayan ismi tabloda görünmeli"
+            assert "Ayşe Demir" in full_text, "Kiracı ismi tabloda görünmeli"
+            assert "15.000 TL" in full_text, "Kira bedeli ödeme tablosunda görünmeli"
+            assert "05.01.2026" in full_text, "Vade tarihi tabloda görünmeli"
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_table_marker_present(self) -> None:
+        """Tablo içeriği [TABLO] etiketiyle sarmalanmış olmalı."""
+        try:
+            from docx import Document as DocxDocument
+        except ImportError:
+            pytest.skip("python-docx not installed")
+
+        from legal_doc_ingestion.parsers.docx_parser import DOCXParser
+
+        doc = DocxDocument()
+        t = doc.add_table(rows=2, cols=2)
+        t.cell(0, 0).text = "A"
+        t.cell(0, 1).text = "B"
+        t.cell(1, 0).text = "C"
+        t.cell(1, 1).text = "D"
+
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+            doc.save(f.name)
+            path = f.name
+
+        try:
+            parser = DOCXParser()
+            raw_doc = parser.parse(Path(path))
+            full_text = "\n".join(p.text for p in raw_doc.pages)
+            assert "[TABLO]" in full_text
+            assert "[/TABLO]" in full_text
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+
+# ======================================================================
+# PDF Parser Güvenlik Limitleri (Bug 11 regresyon)
+# ======================================================================
+
+
+class TestPDFParserLimits:
+    """PDF parser max_pages ve ocr_timeout parametrelerini doğrula."""
+
+    def test_max_pages_constructor_parameter(self) -> None:
+        """PDFParser max_pages parametresini kabul etmeli."""
+        from legal_doc_ingestion.parsers.pdf_parser import PDFParser
+        parser = PDFParser(max_pages=50, ocr_timeout_seconds=10)
+        assert parser._max_pages == 50
+        assert parser._ocr_timeout == 10
+
+    def test_default_max_pages_is_200(self) -> None:
+        from legal_doc_ingestion.parsers.pdf_parser import PDFParser
+        parser = PDFParser()
+        assert parser._max_pages == 200
+
+    def test_ocr_timeout_zero_disables_timeout(self) -> None:
+        """ocr_timeout_seconds=0 olduğunda _ocr_page direkt çağrılmalı (timeout bypass)."""
+        from legal_doc_ingestion.parsers.pdf_parser import PDFParser
+        from unittest.mock import MagicMock, patch
+        from legal_doc_ingestion.parsers.base import RawDocument
+
+        parser = PDFParser(ocr_timeout_seconds=0)
+        fake_page = MagicMock()
+
+        with patch.object(parser, "_ocr_page", return_value=("ocr text", 0.95)) as mock_ocr:
+            raw_doc = RawDocument()
+            result = parser._ocr_page_with_timeout(fake_page, 1, raw_doc)
+            mock_ocr.assert_called_once_with(fake_page)
+            assert result == ("ocr text", 0.95)
