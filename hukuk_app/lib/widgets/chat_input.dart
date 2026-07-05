@@ -123,6 +123,6 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           ],
         ),
       ),
-    ));
+    )));
   }
 }

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
 
+import 'package:file_picker/file_picker.dart';
+
 /// Service for communicating with the Legal RAG backend API.
 class ApiService {
   final String baseUrl;
@@ -29,12 +31,26 @@ class ApiService {
   // Upload documents
   // ------------------------------------------------------------------
 
-  Future<List<UploadResult>> uploadFiles(List<String> filePaths) async {
+  Future<List<UploadResult>> uploadPlatformFiles(List<PlatformFile> files) async {
     final uri = Uri.parse('$baseUrl/api/v1/upload');
     final request = http.MultipartRequest('POST', uri);
 
-    for (final path in filePaths) {
-      request.files.add(await http.MultipartFile.fromPath('files', path));
+    for (final file in files) {
+      if (file.bytes != null) {
+        // For Web
+        request.files.add(http.MultipartFile.fromBytes(
+          'files',
+          file.bytes!,
+          filename: file.name,
+        ));
+      } else if (file.path != null) {
+        // For Desktop/Mobile
+        request.files.add(await http.MultipartFile.fromPath(
+          'files',
+          file.path!,
+          filename: file.name,
+        ));
+      }
     }
 
     final streamedResp = await request.send();

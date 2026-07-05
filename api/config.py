@@ -20,7 +20,7 @@ class Settings:
 
     # -- CORS --
     CORS_ORIGINS: List[str] = os.getenv(
-        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+        "CORS_ORIGINS", "*"
     ).split(",")
 
     # -- File uploads --

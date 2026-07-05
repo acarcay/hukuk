@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
@@ -254,12 +255,12 @@ class UploadNotifier extends StateNotifier<UploadState> {
 
   UploadNotifier(this._ref) : super(const UploadState());
 
-  Future<void> uploadFiles(List<String> paths) async {
+  Future<void> uploadPlatformFiles(List<PlatformFile> files) async {
     state = const UploadState(status: UploadStatus.uploading, progress: 0.3);
 
     try {
       final api = _ref.read(apiServiceProvider);
-      final results = await api.uploadFiles(paths);
+      final results = await api.uploadPlatformFiles(files);
       state = UploadState(
         status: UploadStatus.success,
         results: results,

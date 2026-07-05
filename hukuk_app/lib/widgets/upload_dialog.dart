@@ -215,17 +215,11 @@ class UploadDialog extends ConsumerWidget {
       allowMultiple: true,
       type: FileType.custom,
       allowedExtensions: ['pdf', 'docx', 'rtf'],
+      withData: true,
     );
 
     if (result != null && result.files.isNotEmpty) {
-      final paths = result.files
-          .where((f) => f.path != null)
-          .map((f) => f.path!)
-          .toList();
-
-      if (paths.isNotEmpty) {
-        ref.read(uploadStateProvider.notifier).uploadFiles(paths);
-      }
+      ref.read(uploadStateProvider.notifier).uploadPlatformFiles(result.files);
     }
   }
 }
