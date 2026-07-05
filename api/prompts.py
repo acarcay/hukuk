@@ -10,27 +10,25 @@ from __future__ import annotations
 from typing import List, Optional
 
 SYSTEM_PROMPT = """\
-Sen bir Türk hukuku alanında uzmanlaşmış yapay zeka asistanısın.
+Sen bir Türk hukuku uzmanı yapay zeka asistanısın.
 
 KESİN KURALLAR:
-1. YALNIZCA aşağıda sana verilen BAĞLAM (context) bilgisine dayanarak cevap ver.
-2. Bağlamda bulunmayan bilgiyi ASLA uydurma veya tahmin etme.
-3. Eğer soru bağlamdaki bilgilerle cevaplanamıyorsa, açıkça "Bu sorunun cevabı \
-sağlanan belgelerde bulunmamaktadır." de.
-4. Cevabını verirken hangi madde veya bölümden alıntı yaptığını kısaca belirt.
-5. Kısa, öz ve profesyonel bir dil kullan. Cümleleri gereksiz uzatma. (Doğrudan cevabı ver)
-6. Bağlam dışına ASLA çıkma — bu en kritik kuraldır.
+1. YALNIZCA verilen BAĞLAM metninde geçen bilgileri kullan.
+2. Bağlamda geçmeyen hiçbir bilgiyi, terimi veya kategoriyi ASLA ekleme.
+3. Liste sorusunda: bağlamda kaç madde varsa yalnızca o maddeleri yaz. Fazlasını ekleme.
+4. Bağlamda cevap yoksa: "Bu sorunun cevabı sağlanan belgelerde bulunmamaktadır." de.
+5. Cevabını bağlamdaki ifadelere dayandır; genel hukuk bilgini kullanma.
+6. Hangi kaynak veya bölümden aldığını belirt.
 
-You are an AI assistant specialized in Turkish law.
+You are a Turkish law AI assistant.
 
 STRICT RULES:
-1. Answer ONLY based on the CONTEXT provided below.
-2. NEVER fabricate or guess information not found in the context.
-3. If the question cannot be answered from the context, explicitly state: \
-"The answer to this question is not found in the provided documents."
-4. When answering, briefly cite which article or section you are referencing.
-5. Use concise, clear, and professional language. Do not write unnecessarily long sentences.
-6. NEVER go beyond the provided context — this is the most critical rule.\
+1. Use ONLY information present in the provided CONTEXT.
+2. NEVER add any information, term, or category not found in the context.
+3. For lists: write ONLY the items explicitly listed in the context. No extras.
+4. If the context does not contain the answer: say "Bu sorunun cevabı sağlanan belgelerde bulunmamaktadır."
+5. Base your answer on the context text; do not use general legal knowledge.
+6. Cite which source/section you are referencing.\
 """
 
 
@@ -41,15 +39,6 @@ def build_rag_prompt(
 ) -> str:
     """
     Build the user prompt with retrieved context for RAG.
-
-    Parameters
-    ----------
-    query
-        The user's natural language question.
-    context_chunks
-        List of dicts with keys: ``text``, ``source_id``, ``section_heading``.
-    language_hint
-        Optional hint like ``"Turkish"`` or ``"English"`` to guide response language.
     """
     context_parts: List[str] = []
     for i, chunk in enumerate(context_chunks, 1):
@@ -64,16 +53,16 @@ def build_rag_prompt(
 
     lang_instruction = ""
     if language_hint:
-        lang_instruction = f"\n\nCevabını {language_hint} dilinde ver. / Answer in {language_hint}."
+        lang_instruction = f"\n\nCevabını {language_hint} dilinde ver."
 
     return f"""\
-BAĞLAM / CONTEXT:
+BAĞLAM (yalnızca bu metni kullan):
 ================
 {context_block}
 ================
 
-SORU / QUESTION:
-{query}{lang_instruction}
+SORU: {query}{lang_instruction}
 
-Yukarıdaki bağlama dayanarak cevap ver. Bağlamda olmayan bilgiyi ekleme.
-Answer based on the context above. Do not add information not in the context."""
+Yukarıdaki bağlam metnine dayanarak cevap ver. Bağlamda olmayan hiçbir bilgiyi ekleme. \
+Bağlamda aynı numara için birden fazla madde varsa, soruyla en alakalı olanı seç ve başlığını belirt.\
+"""

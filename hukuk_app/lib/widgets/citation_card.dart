@@ -102,18 +102,20 @@ class _CitationChipState extends State<_CitationChip> {
 
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeInOut,
+      child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: _expanded ? double.infinity : 280,
+          maxWidth: _expanded ? 500 : 280,
         ),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: borderColor, width: 1),
-        ),
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: borderColor, width: 1),
+            ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -284,6 +286,8 @@ class _CitationChipState extends State<_CitationChip> {
               ),
             ],
           ],
+        ),
+          ),
         ),
       ),
     );

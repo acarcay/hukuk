@@ -116,33 +116,34 @@ class DocumentsDialog extends ConsumerWidget {
                                     ),
                                   ],
                                 ),
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  icon: Icon(Icons.delete_outline, size: 18, color: AppColors.error),
-                                  onPressed: () async {
-                                    final confirm = await showDialog<bool>(
-                                      context: context,
-                                      builder: (ctx) => AlertDialog(
-                                        title: const Text('Belgeyi Sil'),
-                                        content: Text('${_cleanFileName(sourceId)} belgesini ve tüm verilerini silmek istediğinize emin misiniz?'),
-                                        actions: [
-                                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
-                                          TextButton(
-                                            onPressed: () => Navigator.pop(ctx, true), 
-                                            child: Text('SİL', style: TextStyle(color: AppColors.error)),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                    if (confirm == true) {
-                                      await ref.read(documentControllerProvider).deleteDocument(sourceId);
-                                    }
-                                  },
-                                ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                                onPressed: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Belgeyi Sil'),
+                                      content: Text('${_cleanFileName(sourceId)} belgesini ve tüm verilerini silmek istediğinize emin misiniz?'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx, true),
+                                          child: Text('SİL', style: TextStyle(color: AppColors.error)),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true) {
+                                    await ref.read(documentControllerProvider).deleteDocument(sourceId);
+                                  }
+                                },
+                              ),
+                            ],
                           ),
-                        );
+                        ),
+                      );
                     },
                   );
                 },

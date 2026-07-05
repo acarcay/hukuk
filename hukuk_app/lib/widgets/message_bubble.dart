@@ -270,18 +270,15 @@ class _TimingInfo extends StatelessWidget {
       children: [
         Icon(Icons.timer_outlined, size: 11, color: muted),
         const SizedBox(width: 4),
-        Text(
-          'Arama: ${message.retrievalTimeMs?.toStringAsFixed(0)}ms'
-          ' · Üretim: ${message.generationTimeMs?.toStringAsFixed(0)}ms',
-          style: TextStyle(fontSize: 10, color: muted),
-        ),
-        if (message.model != null) ...[
-          Text(' · ', style: TextStyle(fontSize: 10, color: muted)),
-          Text(
-            message.model!,
+        Flexible(
+          child: Text(
+            'Arama: ${message.retrievalTimeMs?.toStringAsFixed(0)}ms'
+            ' · Üretim: ${message.generationTimeMs?.toStringAsFixed(0)}ms'
+            '${message.model != null ? ' · ${message.model}' : ''}',
             style: TextStyle(fontSize: 10, color: muted),
+            overflow: TextOverflow.ellipsis,
           ),
-        ],
+        ),
       ],
     );
   }

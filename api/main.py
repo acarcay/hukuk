@@ -86,6 +86,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     yield  # Application runs here
 
     logger.info("Shutting down Legal RAG API…")
+    if services.llm is not None:
+        await services.llm.aclose()
 
 
 # ------------------------------------------------------------------

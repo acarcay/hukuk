@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
-import '../models/models.dart';
-
 class PdfViewerScreen extends StatefulWidget {
   final String sourceId;
   final int pageNumber;
@@ -34,18 +32,31 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     setState(() {
       _isDocumentLoaded = true;
     });
-    
-    // Jump to the specific page
-    _pdfViewerController.jumpToPage(widget.pageNumber);
 
-    // Try to search and highlight the text
-    // We only take the first 40 characters to avoid exact matching issues with whitespace/newlines
-    final query = widget.searchText.length > 40 
-        ? widget.searchText.substring(0, 40).replaceAll('\n', ' ') 
-        : widget.searchText.replaceAll('\n', ' ');
-        
-    _searchResult = await _pdfViewerController.searchText(query);
-    setState(() {});
+    // Small delay so the viewer finishes laying out before we navigate
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+
+    // Jump to the specific page
+    if (widget.pageNumber > 1) {
+      _pdfViewerController.jumpToPage(widget.pageNumber);
+    }
+
+    // Small extra delay before search so the page is rendered
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (!mounted) return;
+
+    // Search & highlight: use the first 60 clean characters
+    final rawQuery = widget.searchText
+        .replaceAll('\n', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final query = rawQuery.length > 60 ? rawQuery.substring(0, 60) : rawQuery;
+
+    if (query.isNotEmpty) {
+      _searchResult = await _pdfViewerController.searchText(query);
+      setState(() {});
+    }
   }
 
   @override

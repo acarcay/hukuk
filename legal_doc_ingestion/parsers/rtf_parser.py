@@ -43,9 +43,12 @@ class RTFParser(BaseParser):
         except OSError as exc:
             raise CorruptedFileError(str(filepath), reason=str(exc)) from exc
 
-        # Try common encodings
+        # Try common encodings in priority order.
+        # IMPORTANT: latin-1 decodes every byte without error (it maps 0-255
+        # one-to-one), so it must come LAST — otherwise cp1254 (Turkish Windows
+        # encoding) is never reached, and İ/ş/ğ/ı/ö/ü/ç are silently garbled.
         raw_text: Optional[str] = None
-        for encoding in ("utf-8", "latin-1", "cp1254", "cp1252"):
+        for encoding in ("utf-8", "cp1254", "cp1252", "latin-1"):
             try:
                 raw_text = raw_bytes.decode(encoding)
                 break

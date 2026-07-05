@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException
@@ -55,6 +56,7 @@ class ContextChunk(BaseModel):
     section_heading: Optional[str]
     text: str
     distance: float
+    page_number: int = 1
 
 
 class ChatResponse(BaseModel):
@@ -71,6 +73,126 @@ class ChatResponse(BaseModel):
 # Context retrieval (runs in thread pool)
 # ------------------------------------------------------------------
 
+import re as _re
+
+
+def _detect_article_range(query: str):
+    """
+    Detect if the query asks for a range of articles by number.
+    Returns (start, end) tuple or None.
+    Examples: "ilk 10 madde" → (1, 10), "madde 1-5" → (1, 5)
+    """
+    q = query.lower()
+
+    # "ilk N madde", "ilk on madde vb."
+    m = _re.search(r'ilk\s+(\d+)\s*madde', q)
+    if m:
+        return 1, int(m.group(1))
+
+    # "madde 1'den 10'a", "1. maddeden 10. maddeye"
+    m = _re.search(r'madde\s*(\d+)[^\d]+?(\d+)', q)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    # "madde 1-10", "1-10. maddeler"
+    m = _re.search(r'(\d+)\s*[-–]\s*(\d+)\.?\s*madde', q)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    return None
+
+
+def _retrieve_by_article_range(
+    start: int,
+    end: int,
+    source_filter,
+    top_k: int,
+    query: str = "",
+) -> List[Dict]:
+    """
+    Retrieve chunks whose section_heading contains MADDE/Article numbers
+    in the given range directly from ChromaDB (no embedding needed).
+    """
+    collection = services.store._get_collection()
+
+    # Build heading patterns for each article number in range
+    article_nums = list(range(start, end + 1))
+    # ChromaDB $in filter on section_heading won't work since heading is a rich string.
+    # Instead fetch all docs and filter in Python.
+    where: Dict = {}
+    if source_filter:
+        if isinstance(source_filter, list) and len(source_filter) == 1:
+            where = {"source_id": source_filter[0]}
+        elif isinstance(source_filter, list):
+            where = {"source_id": {"$in": source_filter}}
+        elif isinstance(source_filter, str):
+            where = {"source_id": source_filter}
+
+    kwargs = {
+        "include": ["documents", "metadatas"],
+        "limit": min(collection.count(), 2000),
+    }
+    if where:
+        kwargs["where"] = where
+
+    raw = collection.get(**kwargs)
+
+    chunks: List[Dict] = []
+    if not raw["ids"]:
+        return chunks
+
+    # Match section headings containing the exact article numbers
+    for i, doc_id in enumerate(raw["ids"]):
+        meta = raw["metadatas"][i] if raw["metadatas"] else {}
+        heading = meta.get("section_heading", "") or ""
+        text = raw["documents"][i] if raw["documents"] else ""
+
+        # Check if heading contains one of the target article numbers
+        # Match "MADDE 1", "Madde 10 -" but NOT "GEÇİCİ MADDE 1"
+        heading_match = _re.search(
+            r'(?<!\w)(?:MADDE|Madde|ARTICLE|Article)\s+(\d+)(?!\s*\w*MADDE)',
+            heading
+        )
+        if heading_match:
+            num = int(heading_match.group(1))
+            if num in article_nums:
+                # Avoid GEÇİCİ MADDE — check heading doesn't start with a qualifier
+                if not _re.search(r'GEÇİCİ|GECİCİ|TEMPORARY|PROVISIONAL', heading.upper()):
+                    chunks.append({
+                        "text": text,
+                        "source_id": meta.get("source_id", ""),
+                        "section_heading": heading,
+                        "distance": 0.0,
+                        "page_number": meta.get("page_number", 1),
+                    })
+
+    # Deduplicate: if multiple chunks share the same article number, keep the best one.
+    # "Best" = chunk whose text has most overlap with the original query terms.
+    query_terms = set(_re.findall(r'\w+', query.lower()))
+
+    by_num: Dict[int, List[Dict]] = {}
+    for chunk in chunks:
+        m = _re.search(r'\d+', chunk["section_heading"] or "")
+        if m:
+            num = int(m.group())
+            by_num.setdefault(num, []).append(chunk)
+
+    deduped: List[Dict] = []
+    for num in sorted(by_num):
+        candidates = by_num[num]
+        if len(candidates) == 1:
+            deduped.append(candidates[0])
+        else:
+            # Score by term overlap with query
+            def score(c):
+                text_terms = set(_re.findall(r'\w+', c["text"].lower()))
+                return len(query_terms & text_terms)
+            best = max(candidates, key=score)
+            deduped.append(best)
+
+    return deduped[:top_k]
+
+
 def _retrieve_context(
     query: str,
     top_k: int,
@@ -78,8 +200,26 @@ def _retrieve_context(
 ) -> List[Dict]:
     """
     Synchronous context retrieval from ChromaDB.
+    Uses article-range detection for ordinal queries,
+    falls back to semantic search for general queries.
     Runs in executor to avoid blocking the event loop.
     """
+    # --- Strategy 1: Article-range query (e.g. "ilk 10 madde") ---
+    article_range = _detect_article_range(query)
+    if article_range:
+        start, end = article_range
+        # Cap range to avoid absurd requests
+        end = min(end, start + 49)
+        range_chunks = _retrieve_by_article_range(
+            start, end, source_filter, top_k=end - start + 1, query=query
+        )
+        if range_chunks:
+            # Mark chunks as coming from article-range retrieval
+            for c in range_chunks:
+                c["_article_range"] = True
+            return range_chunks
+
+    # --- Strategy 2: Standard semantic search ---
     results = services.store.search(
         query,
         services.embedder,
@@ -87,7 +227,6 @@ def _retrieve_context(
         source_filter=source_filter,
     )
 
-    # Truncate total context to stay within token budget
     context_chunks: List[Dict] = []
     total_chars = 0
 
@@ -99,10 +238,35 @@ def _retrieve_context(
             "source_id": r.source_id,
             "section_heading": r.section_heading,
             "distance": r.distance,
+            "page_number": r.page_number,
         })
         total_chars += len(r.text)
 
     return context_chunks
+
+
+# ------------------------------------------------------------------
+# Direct article formatter (bypasses LLM for article-range queries)
+# ------------------------------------------------------------------
+
+def _format_article_range_answer(context_chunks: List[Dict]) -> str:
+    """
+    Format retrieved article chunks as a numbered list directly,
+    without calling the LLM. Guaranteed accurate since it's just
+    copying the indexed text verbatim.
+    """
+    lines = []
+    for c in context_chunks:
+        heading = c.get("section_heading") or ""
+        text = c.get("text", "").strip()
+        if heading:
+            lines.append(f"**{heading}**")
+        if text:
+            # Clean up OCR artifacts (excessive newlines)
+            clean = _re.sub(r'\n{3,}', '\n\n', text).strip()
+            lines.append(clean)
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 # ------------------------------------------------------------------
@@ -133,18 +297,40 @@ async def _stream_sse(
                 "section_heading": c.get("section_heading"),
                 "text": c["text"][:200] + "…" if len(c["text"]) > 200 else c["text"],
                 "distance": round(c["distance"], 4),
+                "page_number": c.get("page_number", 1),
             }
             for c in context_chunks
         ]
     }
     yield f"event: context\ndata: {json.dumps(context_event, ensure_ascii=False)}\n\n"
 
-    # Build prompt
-    user_prompt = build_rag_prompt(query, context_chunks, language_hint=language)
+    # --- Article-range: bypass LLM, stream the formatted answer directly ---
+    is_article_range = any(c.get("_article_range") for c in context_chunks)
+    if is_article_range:
+        gen_start = time.monotonic()
+        answer_text = _format_article_range_answer(context_chunks)
+        # Stream word by word to keep the SSE token flow working
+        for word in answer_text.split(" "):
+            yield f"event: token\ndata: {json.dumps({'token': word + ' '}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0)  # yield control
+        gen_time_ms = (time.monotonic() - gen_start) * 1000
+        done_data = {
+            "model": "direct-extraction",
+            "tokens_generated": len(answer_text.split()),
+            "retrieval_time_ms": round(retrieval_time_ms, 2),
+            "generation_time_ms": round(gen_time_ms, 2),
+        }
+        yield f"event: done\ndata: {json.dumps(done_data)}\n\n"
+        return
+
 
     # Stream LLM tokens
     gen_start = time.monotonic()
     token_count = 0
+
+    user_prompt = build_rag_prompt(
+        query, context_chunks, language_hint=language
+    )
 
     try:
         async for token in services.llm.generate_stream(
@@ -187,7 +373,7 @@ async def _stream_sse(
 async def chat(request: ChatRequest):
     """Handle a RAG chat request."""
     top_k = request.top_k or settings.RAG_TOP_K
-    temperature = request.temperature if request.temperature is not None else 0.1
+    temperature = request.temperature if request.temperature is not None else 0.0
 
     # Check vector store has documents
     if services.store.count == 0:
@@ -242,17 +428,23 @@ async def chat(request: ChatRequest):
     # ------------------------------------------------------------------
     # Non-streaming response
     # ------------------------------------------------------------------
-    user_prompt = build_rag_prompt(
-        request.query, context_chunks, language_hint=request.language
-    )
 
-    t1 = time.monotonic()
-    answer = await services.llm.generate(
-        prompt=user_prompt,
-        system=SYSTEM_PROMPT,
-        temperature=temperature,
-    )
-    gen_ms = (time.monotonic() - t1) * 1000
+    # Article-range: bypass LLM entirely, format answer directly
+    is_article_range = any(c.get("_article_range") for c in context_chunks)
+    if is_article_range:
+        answer = _format_article_range_answer(context_chunks)
+        gen_ms = 0.0
+    else:
+        user_prompt = build_rag_prompt(
+            request.query, context_chunks, language_hint=request.language
+        )
+        t1 = time.monotonic()
+        answer = await services.llm.generate(
+            prompt=user_prompt,
+            system=SYSTEM_PROMPT,
+            temperature=temperature,
+        )
+        gen_ms = (time.monotonic() - t1) * 1000
 
     return ChatResponse(
         answer=answer,
@@ -262,6 +454,7 @@ async def chat(request: ChatRequest):
                 section_heading=c.get("section_heading"),
                 text=c["text"],
                 distance=c["distance"],
+                page_number=c.get("page_number", 1),
             )
             for c in context_chunks
         ],
@@ -308,19 +501,40 @@ async def list_documents():
 )
 async def delete_document(source_id: str):
     """Remove a document from the vector store and delete its source file."""
-    # 1. Delete from ChromaDB
+    # 1. Retrieve disk_filename from ChromaDB *before* deleting vectors
+    disk_filename: Optional[str] = None
+    try:
+        collection = services.store._get_collection()
+        raw = collection.get(
+            where={"source_id": source_id},
+            include=["metadatas"],
+            limit=1,
+        )
+        if raw["metadatas"]:
+            disk_filename = raw["metadatas"][0].get("disk_filename")
+    except Exception as exc:
+        logger.warning("Could not read disk_filename for %s: %s", source_id, exc)
+
+    # 2. Delete vectors from ChromaDB
     try:
         services.store.delete_by_source(source_id)
     except Exception as exc:
         logger.error("Failed to delete vectors for %s: %s", source_id, exc)
 
-    # 2. Delete file from disk
-    file_path = Path(settings.UPLOAD_DIR) / source_id
+    # 3. Delete physical file using the stored disk_filename
+    if disk_filename:
+        file_path = Path(settings.UPLOAD_DIR) / disk_filename
+    else:
+        # Fallback for documents uploaded before this fix
+        file_path = Path(settings.UPLOAD_DIR) / source_id
+
     if file_path.exists():
         try:
             file_path.unlink()
             logger.info("Deleted file: %s", file_path)
         except OSError as exc:
             logger.error("Failed to delete file %s: %s", file_path, exc)
+    else:
+        logger.warning("Physical file not found on disk: %s", file_path)
 
     return {"status": "success", "message": f"Document {source_id} deleted."}

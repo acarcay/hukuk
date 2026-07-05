@@ -73,14 +73,28 @@ def _validate_extension(filename: str) -> str:
     return ext
 
 
-def _process_document(filepath: Path) -> Dict:
+def _process_document(filepath: Path, disk_filename: str) -> Dict:
     """
     Synchronous pipeline: ingest → chunk → embed → store.
     Called inside a thread pool to avoid blocking the event loop.
+
+    ``disk_filename`` is the actual filename on disk (uuid-prefixed),
+    stored as metadata so ``delete_document`` can locate the physical file.
     """
     # Step 1: Ingest (parse + clean)
     result = services.ingestor.ingest(filepath)
     cleaned_text = result.full_cleaned_text()
+
+    # Step 1b: Remove any previously indexed chunks for this source so that
+    # re-uploads of the same filename don't leave orphaned (stale) chunks.
+    # Without this, upsert only overwrites chunks with the same chunk_id; if
+    # the new version has *fewer* chunks, the extras from the old version
+    # survive and contaminate search results with outdated legal text.
+    source_id = result.metadata.filename
+    try:
+        services.store.delete_by_source(source_id)
+    except Exception:
+        pass  # collection may not exist yet on first upload
 
     # Calculate page boundaries
     page_boundaries = []
@@ -90,13 +104,14 @@ def _process_document(filepath: Path) -> Dict:
         page_boundaries.append((current_len, p.page_number))
 
     # Step 2: Semantic chunking
-    source_id = result.metadata.filename
     chunks = services.chunker.chunk(
         cleaned_text,
         source_id=source_id,
         extra_metadata={
             "document_type": result.metadata.document_type.value,
             "total_pages": str(result.metadata.total_pages),
+            # Store the real disk filename so DELETE can find the file
+            "disk_filename": disk_filename,
         },
         page_boundaries=page_boundaries,
     )
@@ -108,6 +123,7 @@ def _process_document(filepath: Path) -> Dict:
     return {
         "filename": result.metadata.filename,
         "source_id": source_id,
+        "disk_filename": disk_filename,
         "document_type": result.metadata.document_type.value,
         "total_pages": result.metadata.total_pages,
         "chunks_created": len(chunks),
@@ -170,10 +186,10 @@ async def upload_documents(
 
             # Run CPU-heavy pipeline in thread pool
             doc_result = await loop.run_in_executor(
-                None, _process_document, filepath
+                None, _process_document, filepath, safe_name
             )
 
-            results.append(UploadResult(**doc_result))
+            results.append(UploadResult(**{k: v for k, v in doc_result.items() if k != "disk_filename"}))
             total_chunks += doc_result["chunks_created"]
 
         except HTTPException:

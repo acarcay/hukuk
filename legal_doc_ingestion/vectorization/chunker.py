@@ -80,10 +80,9 @@ _LEGAL_HEADING_PATTERNS: List[Pattern[str]] = [
     re.compile(
         r"(?im)^[ \t]*(GEÇİCİ\s+MADDE|Geçici\s+Madde)\s+\d+[\s/A-Za-zÇçĞğİıÖöŞşÜü]*\s*[-–—:]?.*$"
     ),
-    # Numbered paragraphs like "1.", "1)", "(1)"
-    re.compile(
-        r"(?im)^[ \t]*\(?(\d{1,3})[.)]\s+.{10,}$"
-    ),
+    # NOTE: deliberately omit generic numbered-paragraph patterns like
+    # r"^\(?\d{1,3}[.)]\s+.{10,}$" because they over-segment contract
+    # lists ("1. Kiracı...", "2. Kiraya veren...") into spurious headings.
 ]
 
 
@@ -177,12 +176,19 @@ class LegalSemanticChunker:
             if not chunk_text:
                 continue
 
-            # Determine page number if boundaries are provided
+            # Determine page number if boundaries are provided.
+            # IMPORTANT: use the *pre-overlap* section body start position so
+            # that overlap text (which belongs to the *previous* page) does not
+            # pull the page number backwards.
             page_num = 1
             if page_boundaries:
-                # Find approximate start index in original text
-                search_len = min(100, len(chunk_text))
-                start_idx = text.find(chunk_text[:search_len])
+                pre_overlap_body = split[idx][1] if idx < len(split) else body
+                search_text = pre_overlap_body.strip()
+                search_snippet = search_text[:100] if search_text else chunk_text[:100]
+                start_idx = text.find(search_snippet)
+                if start_idx == -1:
+                    # Fallback: search with full chunk text (may be slightly off)
+                    start_idx = text.find(chunk_text[:100])
                 if start_idx != -1:
                     for threshold, p_num in page_boundaries:
                         if start_idx < threshold:

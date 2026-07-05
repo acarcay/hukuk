@@ -81,6 +81,9 @@ class MockLLM:
     def model(self) -> str:
         return "mock-llama3:8b"
 
+    async def aclose(self) -> None:
+        pass
+
     async def health_check(self) -> bool:
         return True
 
@@ -99,31 +102,35 @@ class MockLLM:
 
 @pytest.fixture
 def mock_services():
-    """Patch the global services container with mocks."""
+    """Patch the global services container with mocks.
+
+    We also patch ``services.initialize`` so that the FastAPI lifespan
+    event (which calls it on TestClient startup) does NOT overwrite the
+    mocks we set here with real ChromaDB / Embedder / LLM instances.
+    """
+    from unittest.mock import patch as _patch
+
     from api.dependencies import services
-
-    original = {
-        "ingestor": services.ingestor,
-        "chunker": services.chunker,
-        "embedder": services.embedder,
-        "store": services.store,
-        "llm": services.llm,
-    }
-
     from legal_doc_ingestion.ingestion import LegalDocumentIngestor
     from legal_doc_ingestion.vectorization.chunker import LegalSemanticChunker
 
+    # Install mocks before the lifespan runs
     services.ingestor = LegalDocumentIngestor()
     services.chunker = LegalSemanticChunker(overlap_ratio=0.10, min_chunk_chars=50)
     services.embedder = MockEmbedder()
     services.store = MockStore()
     services.llm = MockLLM()
 
-    yield services
+    # Patch initialize() to a no-op so TestClient lifespan cannot overwrite
+    with _patch.object(services, "initialize", return_value=None):
+        yield services
 
-    # Restore
-    for k, v in original.items():
-        setattr(services, k, v)
+    # Restore to uninitialized state after test
+    services.ingestor = None
+    services.chunker = None
+    services.embedder = None
+    services.store = None
+    services.llm = None
 
 
 @pytest.fixture
