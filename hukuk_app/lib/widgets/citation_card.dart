@@ -6,14 +6,21 @@ import '../screens/pdf_viewer_screen.dart';
 
 /// Elegant citation/source card displayed below AI messages.
 /// Shows which document and section the answer was derived from.
-class CitationCard extends StatelessWidget {
+class CitationCard extends StatefulWidget {
   final List<Citation> citations;
 
   const CitationCard({super.key, required this.citations});
 
   @override
+  State<CitationCard> createState() => _CitationCardState();
+}
+
+class _CitationCardState extends State<CitationCard> {
+  bool _isExpanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    if (citations.isEmpty) return const SizedBox.shrink();
+    if (widget.citations.isEmpty) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -22,50 +29,77 @@ class CitationCard extends StatelessWidget {
       children: [
         const SizedBox(height: 12),
         // Header
-        Row(
-          children: [
-            Icon(
-              Icons.source_outlined,
-              size: 14,
-              color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'KAYNAKLAR / SOURCES',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      letterSpacing: 1.2,
-                      color: isDark
-                          ? AppColors.textMuted
-                          : AppColors.lightTextSecondary,
-                    ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '${citations.length} kaynak',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: AppColors.accent,
+        InkWell(
+          onTap: () {
+            setState(() {
+              _isExpanded = !_isExpanded;
+            });
+          },
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.source_outlined,
+                  size: 14,
+                  color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'KAYNAKLAR / SOURCES',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          letterSpacing: 1.2,
+                          color: isDark
+                              ? AppColors.textMuted
+                              : AppColors.lightTextSecondary,
+                        ),
+                    overflow: TextOverflow.ellipsis,
                   ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${widget.citations.length} kaynak',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppColors.accent,
+                      ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  _isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  size: 16,
+                  color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-        const SizedBox(height: 8),
-        // Citation chips
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: citations.asMap().entries.map((entry) {
-            return _CitationChip(
-              citation: entry.value,
-              index: entry.key + 1,
-              isDark: isDark,
-            ).animate().fadeIn(
-                  delay: Duration(milliseconds: 100 * entry.key),
-                  duration: const Duration(milliseconds: 300),
-                );
-          }).toList(),
+        // Citation chips (collapsible)
+        AnimatedCrossFade(
+          firstChild: const SizedBox(width: double.infinity, height: 0),
+          secondChild: Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: widget.citations.asMap().entries.map((entry) {
+                return _CitationChip(
+                  citation: entry.value,
+                  index: entry.key + 1,
+                  isDark: isDark,
+                ).animate().fadeIn(
+                      delay: Duration(milliseconds: 100 * entry.key),
+                      duration: const Duration(milliseconds: 300),
+                    );
+              }).toList(),
+            ),
+          ),
+          crossFadeState: _isExpanded
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 250),
+          alignment: Alignment.topLeft,
         ),
       ],
     );
