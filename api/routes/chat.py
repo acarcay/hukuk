@@ -384,7 +384,7 @@ async def chat(request: ChatRequest):
         )
 
     # Retrieve context (CPU-bound, run in thread)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     t0 = time.monotonic()
 
     context_chunks = await loop.run_in_executor(

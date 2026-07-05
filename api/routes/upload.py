@@ -157,7 +157,7 @@ async def upload_documents(
     upload_dir = _ensure_upload_dir()
     results: List[UploadResult] = []
     total_chunks = 0
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     for upload_file in files:
         filename = upload_file.filename or f"unnamed_{uuid.uuid4().hex[:8]}"

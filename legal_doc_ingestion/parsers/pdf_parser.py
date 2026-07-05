@@ -38,6 +38,13 @@ class PDFParser(BaseParser):
         Tesseract language code(s), e.g. ``"tur+eng"`` for Turkish + English.
     dpi
         Resolution used when rendering pages to images for OCR.
+    max_pages
+        Hard upper limit on pages processed.  Documents exceeding this will
+        be partially ingested with a warning.  Prevents decompression-bomb
+        style DoS from very large scanned PDFs (default: 200).
+    ocr_timeout_seconds
+        Per-page OCR time limit in seconds.  If OCR takes longer the page
+        is skipped and a warning is added.  ``0`` disables the timeout.
     """
 
     def __init__(
@@ -46,10 +53,14 @@ class PDFParser(BaseParser):
         ocr_threshold: int = _MIN_TEXT_LENGTH,
         ocr_language: str = "tur+eng",
         dpi: int = 300,
+        max_pages: int = 200,
+        ocr_timeout_seconds: int = 30,
     ) -> None:
         self._ocr_threshold = ocr_threshold
         self._ocr_language = ocr_language
         self._dpi = dpi
+        self._max_pages = max_pages
+        self._ocr_timeout = ocr_timeout_seconds
 
     # ------------------------------------------------------------------
     # BaseParser interface
@@ -81,8 +92,24 @@ class PDFParser(BaseParser):
             creation_date=doc.metadata.get("creationDate") if doc.metadata else None,
         )
 
+        total_pages = len(doc)
+
+        # Guard: cap the number of pages processed to avoid DoS from huge
+        # scanned PDFs that would monopolise the OCR worker thread.
+        if total_pages > self._max_pages:
+            raw_doc.warnings.append(
+                f"Document has {total_pages} pages but only the first "
+                f"{self._max_pages} will be processed (max_pages={self._max_pages})."
+            )
+            logger.warning(
+                "PDF '%s' has %d pages; capping at %d.",
+                filepath.name, total_pages, self._max_pages,
+            )
+
+        pages_to_process = min(total_pages, self._max_pages)
+
         try:
-            for page_idx in range(len(doc)):
+            for page_idx in range(pages_to_process):
                 page = doc[page_idx]
                 page_num = page_idx + 1
 
@@ -106,8 +133,8 @@ class PDFParser(BaseParser):
                         len(text.strip()),
                     )
                     try:
-                        text, ocr_confidence = self._ocr_page(page)
-                        ocr_applied = True
+                        text, ocr_confidence = self._ocr_page_with_timeout(page, page_num, raw_doc)
+                        ocr_applied = text != ""
                     except OCRError as exc:
                         raw_doc.warnings.append(
                             f"Page {page_num}: OCR failed — {exc}"
@@ -137,6 +164,38 @@ class PDFParser(BaseParser):
     # ------------------------------------------------------------------
     # OCR internals
     # ------------------------------------------------------------------
+
+    def _ocr_page_with_timeout(
+        self,
+        page,  # type: ignore[no-untyped-def]
+        page_num: int,
+        raw_doc: RawDocument,
+    ) -> Tuple[str, Optional[float]]:
+        """
+        Run ``_ocr_page`` with a per-page wall-clock timeout.
+
+        Uses a daemon thread so that even if Tesseract hangs, it won't
+        prevent the main process from continuing.  On timeout the page
+        is skipped and an empty string is returned.
+        """
+        import concurrent.futures
+
+        if self._ocr_timeout <= 0:
+            return self._ocr_page(page)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(self._ocr_page, page)
+            try:
+                return future.result(timeout=self._ocr_timeout)
+            except concurrent.futures.TimeoutError:
+                raw_doc.warnings.append(
+                    f"Page {page_num}: OCR timed out after {self._ocr_timeout}s — page skipped."
+                )
+                logger.warning(
+                    "OCR timeout on page %d of document (limit=%ds).",
+                    page_num, self._ocr_timeout,
+                )
+                return "", None
 
     def _ocr_page(self, page) -> Tuple[str, Optional[float]]:  # type: ignore[no-untyped-def]
         """Render a PyMuPDF page to an image and run pytesseract OCR."""

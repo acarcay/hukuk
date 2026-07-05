@@ -37,6 +37,7 @@ class DOCXParser(BaseParser):
         try:
             from docx import Document as DocxDocument
             from docx.opc.exceptions import PackageNotFoundError
+            from docx.oxml.ns import qn
         except ImportError as exc:
             raise ImportError(
                 "python-docx is required for DOCX parsing. "
@@ -65,21 +66,50 @@ class DOCXParser(BaseParser):
             raw_doc.warnings.append("Could not read document core properties.")
 
         # ------------------------------------------------------------------
-        # Split by page breaks
+        # Build a lookup of table elements by their XML identity so we can
+        # process paragraphs AND tables in document order (not separately).
+        # doc.paragraphs only returns <w:p> elements; doc.tables returns
+        # <w:tbl> elements — iterating doc.element.body covers both.
         # ------------------------------------------------------------------
+        from docx.table import Table as DocxTable
+        from docx.text.paragraph import Paragraph as DocxParagraph
+
         pages_text: List[str] = []
         current_page_lines: List[str] = []
 
         try:
-            for para in doc.paragraphs:
-                # Detect explicit page breaks in runs
-                has_page_break = self._paragraph_has_page_break(para)
+            for child in doc.element.body:
+                tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
 
-                if has_page_break and current_page_lines:
-                    pages_text.append("\n".join(current_page_lines))
-                    current_page_lines = []
+                if tag == "p":  # paragraph
+                    para = DocxParagraph(child, doc)
+                    has_page_break = self._paragraph_has_page_break(para)
+                    if has_page_break and current_page_lines:
+                        pages_text.append("\n".join(current_page_lines))
+                        current_page_lines = []
+                    line = para.text
+                    if line.strip():
+                        current_page_lines.append(line)
 
-                current_page_lines.append(para.text)
+                elif tag == "tbl":  # table — critical for contracts
+                    table = DocxTable(child, doc)
+                    table_lines: List[str] = []
+                    for row in table.rows:
+                        cells = [cell.text.strip() for cell in row.cells]
+                        # Deduplicate merged cells (python-docx repeats them)
+                        deduped: List[str] = []
+                        for cell in cells:
+                            if not deduped or cell != deduped[-1]:
+                                deduped.append(cell)
+                        row_text = "\t".join(deduped)
+                        if row_text.strip():
+                            table_lines.append(row_text)
+                    if table_lines:
+                        # Wrap table content with markers so chunker can
+                        # keep it together and metadata can reflect it
+                        current_page_lines.append("[TABLO]")
+                        current_page_lines.extend(table_lines)
+                        current_page_lines.append("[/TABLO]")
 
             # Flush remaining content
             if current_page_lines:

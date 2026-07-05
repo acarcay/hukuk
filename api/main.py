@@ -122,27 +122,60 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------
-# Request logging middleware
+# Audit / access log (KVKK — Legal data access trail)
+#
+# A separate logger ("legal_rag.access") emits one structured line
+# per request on sensitive endpoints.  Route this to a dedicated
+# file handler (or a SIEM sink) in your logging config:
+#
+#   logging.getLogger("legal_rag.access").addHandler(FileHandler("access.log"))
+#
+# Fields logged per request:
+#   event      — REQUEST | RESPONSE
+#   method     — HTTP verb
+#   path       — endpoint path (NO query string to avoid PII in logs)
+#   client_ip  — caller's IP address
+#   request_id — correlation ID (X-Request-ID header or auto-generated)
+#   status     — HTTP response status code
+#   elapsed_ms — wall-clock time for the full request
+#
+# Query content (legal document text, source_id) is intentionally NOT
+# logged here to prevent personal-data leakage in access logs.
 # ------------------------------------------------------------------
+
+_access_logger = logging.getLogger("legal_rag.access")
+
+# Endpoints that handle potentially sensitive legal content
+_SENSITIVE_PATHS = {"/api/v1/upload", "/api/v1/chat", "/api/v1/documents"}
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log every request with timing."""
+    """Log every request with timing; emit audit trail for sensitive endpoints."""
+    import uuid as _uuid
+
     start = time.monotonic()
-    request_id = request.headers.get("X-Request-ID", "-")
+    request_id = request.headers.get("X-Request-ID") or _uuid.uuid4().hex[:12]
+    client_ip = request.client.host if request.client else "unknown"
+    path = request.url.path
 
     logger.info(
         "→ %s %s (client=%s, request_id=%s)",
-        request.method,
-        request.url.path,
-        request.client.host if request.client else "unknown",
-        request_id,
+        request.method, path, client_ip, request_id,
     )
+
+    # KVKK audit entry — REQUEST phase
+    is_sensitive = any(path.startswith(p) for p in _SENSITIVE_PATHS)
+    if is_sensitive:
+        _access_logger.info(
+            "event=REQUEST method=%s path=%s client_ip=%s request_id=%s",
+            request.method, path, client_ip, request_id,
+        )
 
     try:
         response = await call_next(request)
-    except Exception as exc:
-        logger.exception("Unhandled exception in %s %s", request.method, request.url.path)
+    except Exception:
+        logger.exception("Unhandled exception in %s %s", request.method, path)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error"},
@@ -151,12 +184,20 @@ async def log_requests(request: Request, call_next):
     elapsed_ms = (time.monotonic() - start) * 1000
     logger.info(
         "← %s %s → %d (%.1f ms)",
-        request.method,
-        request.url.path,
-        response.status_code,
-        elapsed_ms,
+        request.method, path, response.status_code, elapsed_ms,
     )
+
+    # KVKK audit entry — RESPONSE phase
+    if is_sensitive:
+        _access_logger.info(
+            "event=RESPONSE method=%s path=%s client_ip=%s request_id=%s "
+            "status=%d elapsed_ms=%.1f",
+            request.method, path, client_ip, request_id,
+            response.status_code, elapsed_ms,
+        )
+
     response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+    response.headers["X-Request-ID"] = request_id
     return response
 
 
