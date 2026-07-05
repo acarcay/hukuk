@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -39,17 +40,21 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     final isStreaming = ref.watch(isStreamingProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        border: Border(
-          top: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkSurface.withOpacity(0.4) : AppColors.lightSurface.withOpacity(0.8),
+            border: Border(
+              top: BorderSide(
+                color: isDark ? AppColors.accent.withOpacity(0.2) : AppColors.lightBorder,
+                width: 1,
+              ),
+            ),
           ),
-        ),
-      ),
-      child: SafeArea(
+          child: SafeArea(
         top: false,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -118,6 +123,6 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           ],
         ),
       ),
-    );
+    ));
   }
 }

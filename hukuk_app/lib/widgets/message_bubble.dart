@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -21,7 +22,7 @@ class MessageBubble extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.symmetric(
         horizontal: isDesktop ? screenWidth * 0.15 : 16,
-        vertical: 6,
+        vertical: 8,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -55,37 +56,33 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
                 // Message content
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isUser
-                        ? AppColors.accent.withOpacity(isDark ? 0.15 : 0.08)
-                        : (isDark
-                            ? AppColors.darkCard
-                            : AppColors.lightCard),
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(20),
-                      topRight: const Radius.circular(20),
-                      bottomLeft: Radius.circular(isUser ? 20 : 4),
-                      bottomRight: Radius.circular(isUser ? 4 : 20),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                    border: Border.all(
-                      color: isUser
-                          ? AppColors.accent.withOpacity(0.3)
-                          : (isDark
-                              ? AppColors.darkBorder
-                              : AppColors.lightBorder),
-                      width: 1,
-                    ),
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(20),
+                    topRight: const Radius.circular(20),
+                    bottomLeft: Radius.circular(isUser ? 20 : 4),
+                    bottomRight: Radius.circular(isUser ? 4 : 20),
                   ),
-                  child: Column(
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: isUser
+                            ? AppColors.accent.withOpacity(isDark ? 0.2 : 0.15)
+                            : (isDark
+                                ? AppColors.darkCard
+                                : AppColors.lightCard.withOpacity(0.9)),
+                        border: Border.all(
+                          color: isUser
+                              ? AppColors.accent.withOpacity(0.5)
+                              : (isDark
+                                  ? AppColors.darkBorder
+                                  : AppColors.lightBorder),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -121,7 +118,7 @@ class MessageBubble extends StatelessWidget {
                       ],
                     ],
                   ),
-                ),
+                ))),
               ],
             ),
           ),
@@ -131,7 +128,7 @@ class MessageBubble extends StatelessWidget {
           ],
         ],
       ),
-    );
+    ).animate().slideY(begin: 0.1, end: 0, duration: 400.ms, curve: Curves.easeOut).fadeIn(duration: 400.ms);
   }
 }
 

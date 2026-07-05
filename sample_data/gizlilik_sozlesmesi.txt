@@ -1,0 +1,10 @@
+GİZLİLİK SÖZLEŞMESİ (NDA)
+
+MADDE 1 - AMAÇ
+İşbu sözleşme, Taraflar arasında yürütülecek olan "Yapay Zeka RAG Projesi" kapsamında paylaşılacak olan ticari ve teknik bilgilerin gizliliğinin korunmasını amaçlar.
+
+MADDE 2 - GİZLİ BİLGİNİN TANIMI
+Taraflar dan birinin diğerine yazılı, sözlü veya elektronik ortamda ilettiği her türlü kaynak kod, algoritma, müşteri verisi ve finansal tablo "Gizli Bilgi" olarak kabul edilir.
+
+MADDE 3 - İHLAL CEZASI
+Gizlilik yükümlülüğünü ihlal eden taraf, ihlali öğrenmesinden itibaren 10 gün içinde karşı tarafa 500.000 TL (Beşyüzbin Türk Lirası) cezai şart ödemeyi kabul ve taahhüt eder.

@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -58,7 +59,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 onClose: () => Navigator.of(context).pop(),
               ),
             ),
-      body: Row(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: const Alignment(-0.8, -0.6),
+            radius: 1.5,
+            colors: [
+              AppColors.meshGlow1.withOpacity(0.4),
+              AppColors.darkBg,
+              AppColors.meshGlow2.withOpacity(0.3),
+            ],
+            stops: const [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: Row(
         children: [
           // Sidebar (desktop only)
           if (isDesktop) const Sidebar(),
@@ -104,17 +118,21 @@ class _ChatAppBar extends ConsumerWidget {
     final session = ref.watch(activeSessionProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkSurface : AppColors.lightSurface.withOpacity(0.8),
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                width: 1,
+              ),
+            ),
           ),
-        ),
-      ),
       child: Row(
         children: [
           if (!isDesktop)
@@ -148,7 +166,7 @@ class _ChatAppBar extends ConsumerWidget {
           _ConnectionStatus(),
         ],
       ),
-    );
+    )));
   }
 }
 

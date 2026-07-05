@@ -13,22 +13,28 @@ final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);
 // ---------------------------------------------------------------------------
 
 class AppColors {
-  // Dark theme
-  static const darkBg = Color(0xFF0D0F12);
-  static const darkSurface = Color(0xFF151820);
-  static const darkSurfaceAlt = Color(0xFF1B1F2B);
-  static const darkCard = Color(0xFF1E2230);
-  static const darkBorder = Color(0xFF2A2F3E);
+  // Dark theme - Deep Base
+  static const darkBg = Color(0xFF06070B);
+  // Glassmorphic surfaces (using opacity)
+  static const darkSurface = Color(0x40151820); // 25% opacity
+  static const darkSurfaceAlt = Color(0x501B1F2B);
+  static const darkCard = Color(0x401E2230);
+  static const darkBorder = Color(0x4D2A2F3E); // 30% opacity
 
-  // Accent — muted gold (authority, trust)
-  static const accent = Color(0xFFCDA44E);
-  static const accentLight = Color(0xFFE8C96A);
-  static const accentMuted = Color(0xFF8A7633);
+  // Mesh Gradient Background Colors
+  static const meshGlow1 = Color(0xFF211042); // Deep neon purple
+  static const meshGlow2 = Color(0xFF0A1938); // Deep neon blue
+  static const meshGlow3 = Color(0xFF30210E); // Deep gold glow
+
+  // Accent — Vibrant Gold (authority, premium)
+  static const accent = Color(0xFFE2B756);
+  static const accentLight = Color(0xFFFDE093);
+  static const accentMuted = Color(0x668A7633);
 
   // Text
-  static const textPrimary = Color(0xFFF0F0F2);
-  static const textSecondary = Color(0xFF9CA3B4);
-  static const textMuted = Color(0xFF5F6679);
+  static const textPrimary = Color(0xFFF8F8FA);
+  static const textSecondary = Color(0xFFA6ADBF);
+  static const textMuted = Color(0xFF6B728E);
 
   // Semantic
   static const success = Color(0xFF4CAF7D);
@@ -133,7 +139,7 @@ class AppTheme {
         outline: AppColors.darkBorder,
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.darkSurface,
+        backgroundColor: Colors.transparent, // Glassmorphism
         elevation: 0,
         centerTitle: false,
         titleTextStyle: textTheme.titleLarge,
@@ -143,7 +149,7 @@ class AppTheme {
         color: AppColors.darkCard,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16), // Softer corners
           side: const BorderSide(color: AppColors.darkBorder, width: 1),
         ),
       ),
