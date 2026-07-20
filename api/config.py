@@ -77,10 +77,20 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.1:8b"
     OLLAMA_TIMEOUT: int = 120
+    # How long Ollama keeps the model resident in memory after a request.
+    # "-1" = never unload (fastest, keeps ~5 GB pinned); "30m" = keep 30 min.
+    # Avoids paying the cold model-load cost on every idle-then-first request.
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    # Context window (tokens). Must be large enough to hold the system prompt +
+    # the retrieved RAG context, otherwise Ollama SILENTLY truncates it and the
+    # model never sees the later chunks. Bigger = more memory + slower prefill.
+    OLLAMA_NUM_CTX: int = 4096
 
     # -- RAG --
-    RAG_TOP_K: int = 8
-    RAG_MAX_CONTEXT_CHARS: int = 16000
+    # Fewer chunks = less prompt to prefill = faster time-to-first-token.
+    # 5 is plenty for typical single/compound contract questions.
+    RAG_TOP_K: int = 5
+    RAG_MAX_CONTEXT_CHARS: int = 10000
 
     # -- Audit log (KVKK access trail) --
     # File that the "legal_rag.access" logger writes to.  Set to "" to disable

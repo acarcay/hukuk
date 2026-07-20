@@ -271,9 +271,11 @@ SSE events: `context` → `token`* → `done`
 | `API_KEY` | *(empty)* | If set, requires `X-API-Key` header on sensitive endpoints |
 | `OLLAMA_MODEL` | `llama3.1:8b` | Ollama model tag |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_KEEP_ALIVE` | `30m` | Keep model resident to avoid cold-load latency (`-1` = never unload) |
+| `OLLAMA_NUM_CTX` | `4096` | Context window (tokens); must fit system prompt + RAG context or Ollama silently truncates |
 | `EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformer model |
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | ChromaDB storage path |
-| `RAG_TOP_K` | `8` | Context chunks to retrieve |
+| `RAG_TOP_K` | `5` | Context chunks to retrieve (fewer = faster generation) |
 | `CORS_ORIGINS` | `http://localhost:3000,8080,...` | Allowed CORS origins (`*` disables credentials) |
 | `AUDIT_LOG_FILE` | `logs/access.log` | KVKK access-audit trail file (`""` to disable) |
 

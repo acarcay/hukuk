@@ -187,10 +187,12 @@ class OllamaClient:
             "prompt": prompt,
             "system": system,
             "stream": True,
+            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
             "options": {
                 "temperature": temperature,
                 "top_p": top_p,
                 "num_predict": max_tokens,
+                "num_ctx": settings.OLLAMA_NUM_CTX,
             },
         }
 
@@ -236,9 +238,11 @@ class OllamaClient:
             "prompt": prompt,
             "system": system,
             "stream": False,
+            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "num_ctx": settings.OLLAMA_NUM_CTX,
             },
         }
 
@@ -272,9 +276,11 @@ class OllamaClient:
             "model": self._model,
             "messages": messages,
             "stream": True,
+            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "num_ctx": settings.OLLAMA_NUM_CTX,
             },
         }
 
