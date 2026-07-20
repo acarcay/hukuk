@@ -202,9 +202,30 @@ pip install -r requirements.txt
 # Development
 PYTHONPATH=. uvicorn api.main:app --reload --port 8000
 
-# Production
-PYTHONPATH=. uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4
+# Production (single worker — see note below)
+API_KEY=your-strong-secret \
+PYTHONPATH=. uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
+
+> **⚠ Do not use `--workers N` with the default local ChromaDB.**
+> Each worker is a separate process that opens the same persistent SQLite
+> store (risking lock contention/corruption) and loads its own copy of the
+> embedding model (~0.5 GB each). For horizontal scaling, run ChromaDB in
+> client/server mode and point `CHROMA_*` at it, then scale workers.
+
+### Authentication
+
+Set the `API_KEY` environment variable (or put it in `.env`) to require an
+`X-API-Key` header on `/upload`, `/chat`, and `/documents`. When `API_KEY`
+is unset, auth is **disabled** — intended for local development only; the
+server logs a warning at startup. `/health` and `/` stay public.
+
+```bash
+curl -H "X-API-Key: your-strong-secret" http://localhost:8000/api/v1/documents
+```
+
+Configuration can be supplied via environment variables **or** a `.env`
+file in the project root (see `.env.example`).
 
 Open **http://localhost:8000/docs** for interactive Swagger documentation.
 
@@ -246,12 +267,15 @@ SSE events: `context` → `token`* → `done`
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_MODEL` | `llama3:8b` | Ollama model tag |
+| `API_HOST` | `127.0.0.1` | Bind address (use `0.0.0.0` to expose) |
+| `API_KEY` | *(empty)* | If set, requires `X-API-Key` header on sensitive endpoints |
+| `OLLAMA_MODEL` | `llama3.1:8b` | Ollama model tag |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformer model |
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | ChromaDB storage path |
-| `RAG_TOP_K` | `5` | Context chunks to retrieve |
-| `CORS_ORIGINS` | `http://localhost:3000,...` | Allowed CORS origins |
+| `RAG_TOP_K` | `8` | Context chunks to retrieve |
+| `CORS_ORIGINS` | `http://localhost:3000,8080,...` | Allowed CORS origins (`*` disables credentials) |
+| `AUDIT_LOG_FILE` | `logs/access.log` | KVKK access-audit trail file (`""` to disable) |
 
 ## Error Handling
 
