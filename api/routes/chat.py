@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from api.config import settings
 from api.dependencies import services
-from api.prompts import SYSTEM_PROMPT, build_rag_prompt
+from api.prompts import NOT_FOUND_ANSWER, SYSTEM_PROMPT, build_rag_prompt
 from api.security import require_api_key
 
 logger = logging.getLogger(__name__)
@@ -349,6 +349,83 @@ def _format_article_range_answer(context_chunks: List[Dict]) -> str:
 
 
 # ------------------------------------------------------------------
+# Answer sanitization
+#
+# Small local models sometimes emit the canonical "not found" sentence
+# and then contradict themselves with the real answer ("... Ancak,
+# MADDE 5'e göre ..."). The prompt forbids this, but 8B-class models
+# don't follow that reliably — so we also strip the contradictory
+# prefix deterministically on the server.
+# ------------------------------------------------------------------
+
+_CONTRADICTION_CONNECTOR = _re.compile(
+    r"(Ancak|Ama|Fakat|Bununla\s+birlikte|Yine\s+de)\b", _re.IGNORECASE
+)
+
+
+def _strip_contradictory_notfound(answer: str) -> str:
+    """
+    If the answer starts with NOT_FOUND_ANSWER but continues with a
+    contradiction connector ("Ancak ..."), drop the not-found prefix and
+    keep the real answer. Pure not-found answers pass through unchanged.
+    """
+    lead = answer.lstrip()
+    if not lead.startswith(NOT_FOUND_ANSWER):
+        return answer
+    rest = lead[len(NOT_FOUND_ANSWER):].lstrip(" \t\n.()")
+    if _CONTRADICTION_CONNECTOR.match(rest):
+        return lead[len(NOT_FOUND_ANSWER):].lstrip(" \t\n.")
+    return answer
+
+
+async def _sanitized_token_stream(token_stream):
+    """
+    Streaming version of ``_strip_contradictory_notfound``.
+
+    Buffers only while the accumulated text is still a possible prefix of
+    NOT_FOUND_ANSWER (~60 chars, a few tokens), so normal answers start
+    flowing almost immediately. If the not-found sentence completes and is
+    followed by a contradiction connector, the prefix is dropped before
+    anything reaches the client.
+    """
+    buffer = ""
+    buffering = True
+    async for token in token_stream:
+        if not buffering:
+            yield token
+            continue
+
+        buffer += token
+        lead = buffer.lstrip()
+
+        if len(lead) <= len(NOT_FOUND_ANSWER):
+            if NOT_FOUND_ANSWER.startswith(lead):
+                continue  # still a possible not-found prefix — keep buffering
+            buffering = False
+            yield buffer
+            continue
+
+        if not lead.startswith(NOT_FOUND_ANSWER):
+            buffering = False
+            yield buffer
+            continue
+
+        # Not-found sentence is complete; wait for the first word after it
+        # to decide whether it's a contradiction ("Ancak ...") or noise.
+        rest = lead[len(NOT_FOUND_ANSWER):].lstrip(" \t\n.()")
+        if len(rest) < 20 and not _re.search(r"\s", rest):
+            continue  # first word not complete yet
+        buffering = False
+        if _CONTRADICTION_CONNECTOR.match(rest):
+            yield lead[len(NOT_FOUND_ANSWER):].lstrip(" \t\n.")
+        else:
+            yield buffer
+
+    if buffering and buffer:
+        yield buffer  # stream ended while buffering (e.g. pure not-found)
+
+
+# ------------------------------------------------------------------
 # SSE streaming
 # ------------------------------------------------------------------
 
@@ -412,11 +489,12 @@ async def _stream_sse(
     )
 
     try:
-        async for token in services.llm.generate_stream(
+        raw_stream = services.llm.generate_stream(
             prompt=user_prompt,
             system=SYSTEM_PROMPT,
             temperature=temperature,
-        ):
+        )
+        async for token in _sanitized_token_stream(raw_stream):
             token_count += 1
             yield f"event: token\ndata: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
 
@@ -524,6 +602,7 @@ async def chat(request: ChatRequest):
             system=SYSTEM_PROMPT,
             temperature=temperature,
         )
+        answer = _strip_contradictory_notfound(answer)
         gen_ms = (time.monotonic() - t1) * 1000
 
     return ChatResponse(

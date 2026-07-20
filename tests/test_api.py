@@ -537,6 +537,73 @@ class TestSubquerySplitting:
 
 
 # ------------------------------------------------------------------
+# Contradictory "not found" prefix stripping
+# ------------------------------------------------------------------
+
+class TestNotFoundSanitizer:
+    """Model 'bulunamadı... Ancak <gerçek cevap>' derse önek düşürülmeli."""
+
+    def test_contradiction_prefix_stripped(self):
+        from api.prompts import NOT_FOUND_ANSWER
+        from api.routes.chat import _strip_contradictory_notfound
+        answer = (
+            f"{NOT_FOUND_ANSWER}\n\nAncak, kira artış oranı için ilgili bilgi "
+            "MADDE 5'te verilmiştir."
+        )
+        result = _strip_contradictory_notfound(answer)
+        assert not result.startswith(NOT_FOUND_ANSWER)
+        assert result.startswith("Ancak")
+
+    def test_pure_notfound_untouched(self):
+        from api.prompts import NOT_FOUND_ANSWER
+        from api.routes.chat import _strip_contradictory_notfound
+        assert _strip_contradictory_notfound(NOT_FOUND_ANSWER) == NOT_FOUND_ANSWER
+
+    def test_normal_answer_untouched(self):
+        from api.routes.chat import _strip_contradictory_notfound
+        answer = "MADDE 4'e göre aylık kira bedeli 25.000 TL'dir."
+        assert _strip_contradictory_notfound(answer) == answer
+
+    @staticmethod
+    def _collect_stream(tokens):
+        """Token listesini _sanitized_token_stream'den geçirip birleştir."""
+        import asyncio
+        from api.routes.chat import _sanitized_token_stream
+
+        async def _gen():
+            for t in tokens:
+                yield t
+
+        async def _run():
+            out = []
+            async for t in _sanitized_token_stream(_gen()):
+                out.append(t)
+            return "".join(out)
+
+        return asyncio.run(_run())
+
+    def test_stream_contradiction_stripped(self):
+        from api.prompts import NOT_FOUND_ANSWER
+        # Cümleyi küçük token'lara böl — gerçek stream gibi
+        text = f"{NOT_FOUND_ANSWER} Ancak, MADDE 5'e göre TÜFE oranı esas alınır."
+        tokens = [text[i:i + 4] for i in range(0, len(text), 4)]
+        result = self._collect_stream(tokens)
+        assert not result.startswith(NOT_FOUND_ANSWER)
+        assert result.startswith("Ancak")
+        assert "TÜFE" in result
+
+    def test_stream_pure_notfound_passes_through(self):
+        from api.prompts import NOT_FOUND_ANSWER
+        tokens = [NOT_FOUND_ANSWER[i:i + 5] for i in range(0, len(NOT_FOUND_ANSWER), 5)]
+        assert self._collect_stream(tokens) == NOT_FOUND_ANSWER
+
+    def test_stream_normal_answer_passes_through(self):
+        text = "MADDE 3'e göre deneme süresi 2 (iki) aydır."
+        tokens = [text[i:i + 4] for i in range(0, len(text), 4)]
+        assert self._collect_stream(tokens) == text
+
+
+# ------------------------------------------------------------------
 # API-key authentication
 # ------------------------------------------------------------------
 
