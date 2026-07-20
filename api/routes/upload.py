@@ -15,11 +15,12 @@ import uuid
 from pathlib import Path
 from typing import Dict, List
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from api.config import settings
 from api.dependencies import services
+from api.security import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,7 @@ def _process_document(filepath: Path, disk_filename: str, original_filename: str
         "run the full ingestion pipeline (parse → clean → chunk → embed), "
         "and store the vectors in ChromaDB."
     ),
+    dependencies=[Depends(require_api_key)],
 )
 async def upload_documents(
     files: List[UploadFile] = File(
@@ -178,18 +180,37 @@ async def upload_documents(
         filepath = upload_dir / safe_name
 
         try:
-            content = await upload_file.read()
+            # Stream the upload to disk in chunks, enforcing the size limit
+            # incrementally so an oversized file is rejected *before* it is
+            # fully buffered in memory (bounded memory + early abort).
+            max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+            written = 0
+            _CHUNK = 1024 * 1024  # 1 MB
+            try:
+                with filepath.open("wb") as fh:
+                    while True:
+                        chunk = await upload_file.read(_CHUNK)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if written > max_bytes:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=f"File '{filename}' exceeds "
+                                       f"{settings.MAX_UPLOAD_SIZE_MB}MB limit.",
+                            )
+                        fh.write(chunk)
+            except HTTPException:
+                filepath.unlink(missing_ok=True)  # remove partial file
+                raise
 
-            # Check file size
-            size_mb = len(content) / (1024 * 1024)
-            if size_mb > settings.MAX_UPLOAD_SIZE_MB:
+            if written == 0:
+                filepath.unlink(missing_ok=True)
                 raise HTTPException(
-                    status_code=413,
-                    detail=f"File '{filename}' exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit.",
+                    status_code=400, detail=f"File '{filename}' is empty."
                 )
 
-            filepath.write_bytes(content)
-            logger.info("Saved %s (%.2f MB)", safe_name, size_mb)
+            logger.info("Saved %s (%.2f MB)", safe_name, written / (1024 * 1024))
 
             # Run CPU-heavy pipeline in thread pool
             doc_result = await loop.run_in_executor(
