@@ -81,21 +81,28 @@ class MockStore:
             ))
         return results
 
-    def _get_collection(self):
-        mock_collection = MagicMock()
-        mock_collection.count.return_value = self._count
-        mock_collection.get.return_value = {
-            "ids": [f"id_{i}" for i in range(len(self._docs))],
+    def get_all(self, *, where=None, limit=None, include=None):
+        docs = self._docs
+        if where and "source_id" in where and isinstance(where["source_id"], str):
+            docs = [d for d in docs if d["source_id"] == where["source_id"]]
+        return {
+            "ids": [f"id_{i}" for i in range(len(docs))],
+            "documents": [d["text"] for d in docs],
             "metadatas": [
                 {
                     "source_id": d["source_id"],
                     "document_type": "pdf",
+                    "section_heading": d.get("section_heading"),
                     "disk_filename": d.get("disk_filename", d["source_id"]),
                 }
-                for d in self._docs
+                for d in docs
             ],
         }
-        return mock_collection
+
+    def get_source_metadata(self, source_id: str):
+        raw = self.get_all(where={"source_id": source_id}, limit=1, include=["metadatas"])
+        metas = raw.get("metadatas") or []
+        return metas[0] if metas else None
 
 
 class MockLLM:
@@ -480,3 +487,66 @@ class TestHealthEdgeCases:
         """X-Request-ID header'ı response'a yansımalı."""
         resp = client.get("/health", headers={"X-Request-ID": "test-123"})
         assert resp.headers.get("X-Request-ID") == "test-123"
+
+
+# ------------------------------------------------------------------
+# API-key authentication
+# ------------------------------------------------------------------
+
+class TestApiKeyAuth:
+    """require_api_key: anahtar tanımlıysa hassas endpoint'ler korunmalı."""
+
+    def test_protected_endpoint_401_without_key(self, client, mock_services):
+        """API_KEY set edilince anahtarsız istek 401 dönmeli."""
+        from api.config import settings
+
+        original = settings.API_KEY
+        settings.API_KEY = "s3cret"
+        try:
+            resp = client.get("/api/v1/documents")  # no X-API-Key header
+            assert resp.status_code == 401
+        finally:
+            settings.API_KEY = original
+
+    def test_protected_endpoint_401_with_wrong_key(self, client, mock_services):
+        from api.config import settings
+
+        original = settings.API_KEY
+        settings.API_KEY = "s3cret"
+        try:
+            resp = client.get(
+                "/api/v1/documents", headers={"X-API-Key": "wrong"}
+            )
+            assert resp.status_code == 401
+        finally:
+            settings.API_KEY = original
+
+    def test_protected_endpoint_200_with_correct_key(self, client, mock_services):
+        from api.config import settings
+
+        original = settings.API_KEY
+        settings.API_KEY = "s3cret"
+        try:
+            resp = client.get(
+                "/api/v1/documents", headers={"X-API-Key": "s3cret"}
+            )
+            assert resp.status_code == 200
+        finally:
+            settings.API_KEY = original
+
+    def test_auth_disabled_allows_access(self, client):
+        """API_KEY boşken (varsayılan) auth devre dışı — 200."""
+        resp = client.get("/api/v1/documents")
+        assert resp.status_code == 200
+
+    def test_health_not_protected(self, client, mock_services):
+        """/health auth gerektirmemeli (anahtar set olsa bile)."""
+        from api.config import settings
+
+        original = settings.API_KEY
+        settings.API_KEY = "s3cret"
+        try:
+            resp = client.get("/health")
+            assert resp.status_code == 200
+        finally:
+            settings.API_KEY = original
