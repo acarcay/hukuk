@@ -5,6 +5,11 @@ import '../models/models.dart';
 
 import 'package:file_picker/file_picker.dart';
 
+// Platform-conditional client: on web this returns a Fetch-API-based client
+// (real response streaming); elsewhere the default dart:io client.
+import 'http_client_factory_io.dart'
+    if (dart.library.js_interop) 'http_client_factory_web.dart';
+
 /// Service for communicating with the Legal RAG backend API.
 class ApiService {
   final String baseUrl;
@@ -16,7 +21,7 @@ class ApiService {
     this.apiKey = _defaultApiKey,
     http.Client? client,
   })  : baseUrl = baseUrl ?? _defaultBaseUrl,
-        _client = client ?? http.Client();
+        _client = client ?? createStreamingHttpClient();
 
   /// Base URL — overridable at build/run time with:
   ///   flutter run --dart-define=API_BASE_URL=http://192.168.1.5:8000

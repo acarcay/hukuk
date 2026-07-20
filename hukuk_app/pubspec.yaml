@@ -18,6 +18,10 @@ dependencies:
   # HTTP & SSE
   http: ^1.2.0
   dio: ^5.4.0
+  # Web-only: Fetch API client with real response streaming.
+  # The default http BrowserClient uses XHR, which buffers the whole body —
+  # SSE tokens would all arrive at once when generation finishes.
+  fetch_client: ^1.1.2
 
   # File picker for document upload
   file_picker: ^8.0.0
