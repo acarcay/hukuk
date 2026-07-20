@@ -238,6 +238,45 @@ class ChromaVectorStore:
 
         return results
 
+    def get_all(
+        self,
+        *,
+        where: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
+        include: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch raw records (documents + metadata) from the collection without
+        a similarity query.  Thin wrapper over ChromaDB's ``collection.get``
+        so callers don't need to reach into the private collection object.
+
+        Parameters
+        ----------
+        where : dict, optional
+            Metadata filter (e.g. ``{"source_id": "contract.pdf"}``).
+        limit : int, optional
+            Maximum number of records to return.
+        include : list[str], optional
+            Fields to include (default: ``["documents", "metadatas"]``).
+        """
+        collection = self._get_collection()
+        kwargs: Dict[str, Any] = {
+            "include": include or ["documents", "metadatas"],
+        }
+        if where:
+            kwargs["where"] = where
+        if limit is not None:
+            kwargs["limit"] = limit
+        return collection.get(**kwargs)
+
+    def get_source_metadata(self, source_id: str) -> Optional[Dict[str, Any]]:
+        """Return the metadata of the first chunk for ``source_id`` (or None)."""
+        raw = self.get_all(
+            where={"source_id": source_id}, limit=1, include=["metadatas"]
+        )
+        metas = raw.get("metadatas") or []
+        return metas[0] if metas else None
+
     def delete_by_source(self, source_id: str) -> None:
         """Remove all chunks belonging to a specific source document."""
         collection = self._get_collection()

@@ -9,17 +9,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re as _re
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.config import settings
 from api.dependencies import services
 from api.prompts import SYSTEM_PROMPT, build_rag_prompt
+from api.security import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +75,6 @@ class ChatResponse(BaseModel):
 # Context retrieval (runs in thread pool)
 # ------------------------------------------------------------------
 
-import re as _re
-
 
 def _detect_article_range(query: str):
     """
@@ -113,8 +113,6 @@ def _retrieve_by_article_range(
     Retrieve chunks whose section_heading contains MADDE/Article numbers
     in the given range directly from ChromaDB (no embedding needed).
     """
-    collection = services.store._get_collection()
-
     # Build heading patterns for each article number in range
     article_nums = list(range(start, end + 1))
     # ChromaDB $in filter on section_heading won't work since heading is a rich string.
@@ -128,14 +126,11 @@ def _retrieve_by_article_range(
         elif isinstance(source_filter, str):
             where = {"source_id": source_filter}
 
-    kwargs = {
-        "include": ["documents", "metadatas"],
-        "limit": min(collection.count(), 2000),
-    }
-    if where:
-        kwargs["where"] = where
-
-    raw = collection.get(**kwargs)
+    raw = services.store.get_all(
+        where=where or None,
+        limit=min(services.store.count, 2000),
+        include=["documents", "metadatas"],
+    )
 
     chunks: List[Dict] = []
     if not raw["ids"]:
@@ -369,6 +364,7 @@ async def _stream_sse(
         "an answer using the local LLM. Supports streaming (SSE) and "
         "non-streaming modes. Enforces a Zero-Hallucination policy."
     ),
+    dependencies=[Depends(require_api_key)],
 )
 async def chat(request: ChatRequest):
     """Handle a RAG chat request."""
@@ -472,11 +468,11 @@ async def chat(request: ChatRequest):
     "/documents",
     summary="List all indexed document sources",
     tags=["Documents"],
+    dependencies=[Depends(require_api_key)],
 )
 async def list_documents():
     """Return metadata about documents currently in the vector store."""
-    collection = services.store._get_collection()
-    all_data = collection.get(include=["metadatas"])
+    all_data = services.store.get_all(include=["metadatas"])
 
     sources: Dict[str, Dict] = {}
     if all_data["metadatas"]:
@@ -498,20 +494,16 @@ async def list_documents():
     "/documents/{source_id}",
     summary="Delete a document and its vectors",
     tags=["Documents"],
+    dependencies=[Depends(require_api_key)],
 )
 async def delete_document(source_id: str):
     """Remove a document from the vector store and delete its source file."""
     # 1. Retrieve disk_filename from ChromaDB *before* deleting vectors
     disk_filename: Optional[str] = None
     try:
-        collection = services.store._get_collection()
-        raw = collection.get(
-            where={"source_id": source_id},
-            include=["metadatas"],
-            limit=1,
-        )
-        if raw["metadatas"]:
-            disk_filename = raw["metadatas"][0].get("disk_filename")
+        meta = services.store.get_source_metadata(source_id)
+        if meta:
+            disk_filename = meta.get("disk_filename")
     except Exception as exc:
         logger.warning("Could not read disk_filename for %s: %s", source_id, exc)
 
@@ -521,14 +513,22 @@ async def delete_document(source_id: str):
     except Exception as exc:
         logger.error("Failed to delete vectors for %s: %s", source_id, exc)
 
-    # 3. Delete physical file using the stored disk_filename
-    if disk_filename:
-        file_path = Path(settings.UPLOAD_DIR) / disk_filename
-    else:
-        # Fallback for documents uploaded before this fix
-        file_path = Path(settings.UPLOAD_DIR) / source_id
+    # 3. Delete physical file using the stored disk_filename.
+    #    Both disk_filename and source_id are user-influenced, so we resolve
+    #    the final path and verify it stays *inside* UPLOAD_DIR before any
+    #    unlink — this blocks path-traversal (e.g. "../../etc/passwd").
+    upload_root = Path(settings.UPLOAD_DIR).resolve()
+    candidate_name = disk_filename or source_id  # fallback for legacy uploads
+    # Only ever use the basename — strip any directory components.
+    safe_name = Path(candidate_name).name
+    file_path = (upload_root / safe_name).resolve()
 
-    if file_path.exists():
+    if not file_path.is_relative_to(upload_root):
+        logger.error(
+            "Refusing to delete file outside upload dir: %s (source_id=%s)",
+            file_path, source_id,
+        )
+    elif file_path.exists():
         try:
             file_path.unlink()
             logger.info("Deleted file: %s", file_path)
