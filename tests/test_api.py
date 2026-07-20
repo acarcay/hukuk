@@ -490,6 +490,53 @@ class TestHealthEdgeCases:
 
 
 # ------------------------------------------------------------------
+# Compound-question decomposition
+# ------------------------------------------------------------------
+
+class TestSubquerySplitting:
+    """_split_subqueries: bileşik sorular ayrılmalı, basit sorular korunmalı."""
+
+    def test_single_question_unchanged(self):
+        from api.routes.chat import _split_subqueries
+        assert _split_subqueries("Kira bedeli nedir?") == ["Kira bedeli nedir"]
+
+    def test_compound_veya_with_quotes_splits_into_two(self):
+        from api.routes.chat import _split_subqueries
+        q = ('Bu sözleşmeye göre yıllık kira artış oranı yüzde kaçtır?" '
+             'veya "İşçinin deneme süresi kaç ay olarak belirlenmiş?')
+        parts = _split_subqueries(q)
+        assert len(parts) == 2
+        assert "kira artış" in parts[0]
+        assert "deneme süresi" in parts[1]
+
+    def test_short_veya_alternative_not_split(self):
+        """«kiracı veya kiraya veren kimdir» tek soru kalmalı."""
+        from api.routes.chat import _split_subqueries
+        assert len(_split_subqueries("kiracı veya kiraya veren kimdir?")) == 1
+
+    def test_two_question_marks_split(self):
+        from api.routes.chat import _split_subqueries
+        q = "Aylık kira bedeli ne kadardır? Depozito tutarı ne kadardır?"
+        parts = _split_subqueries(q)
+        assert len(parts) == 2
+
+    def test_merge_round_robin_dedupes_and_caps(self):
+        from api.routes.chat import _merge_subquery_results
+        from legal_doc_ingestion.vectorization.store import SearchResult
+
+        def sr(cid, text):
+            return SearchResult(chunk_id=cid, text=text, distance=0.1)
+
+        a = [sr("a1", "A1"), sr("a2", "A2"), sr("x", "SHARED")]
+        b = [sr("b1", "B1"), sr("x", "SHARED"), sr("b3", "B3")]
+        merged = _merge_subquery_results([a, b], top_k=4)
+        ids = [r.chunk_id for r in merged]
+        assert len(merged) == 4
+        assert ids[0] == "a1" and ids[1] == "b1"  # round-robin: her alt soru katkı verir
+        assert ids.count("x") <= 1                 # dedupe
+
+
+# ------------------------------------------------------------------
 # API-key authentication
 # ------------------------------------------------------------------
 

@@ -188,6 +188,75 @@ def _retrieve_by_article_range(
     return deduped[:top_k]
 
 
+# ------------------------------------------------------------------
+# Compound-question decomposition
+#
+# A query like «yıllık kira artış oranı yüzde kaçtır?" veya "deneme
+# süresi kaç ay?» embeds to a blurry average of two topics, so the
+# single k-NN search misses one (or both) of the relevant articles.
+# We split such queries into sub-queries, search each separately and
+# merge the results round-robin so every sub-question contributes
+# context chunks.
+# ------------------------------------------------------------------
+
+_CONNECTOR_SPLIT = _re.compile(r"\s+(?:veya|ya\s+da)\s+", _re.IGNORECASE)
+_LEADING_CONNECTOR = _re.compile(r"^(?:veya|ya\s+da|ve|ayrıca)\s+", _re.IGNORECASE)
+_QUOTE_STRIP = " \t\n\"'“”«»"
+
+
+def _split_subqueries(query: str) -> List[str]:
+    """
+    Split a compound question into independent sub-queries.
+
+    Splits at question marks and at 'veya' / 'ya da' connectors — but only
+    when both sides look like full questions (≥ 4 words each), so short
+    alternatives like «kiracı veya kiraya veren kimdir» stay intact.
+    Returns [query] unchanged for simple questions.
+    """
+    parts = [p.strip(_QUOTE_STRIP) for p in query.split("?")]
+    parts = [_LEADING_CONNECTOR.sub("", p).strip(_QUOTE_STRIP) for p in parts]
+    parts = [p for p in parts if p]
+
+    subqueries: List[str] = []
+    for part in parts:
+        pieces = [pc.strip(_QUOTE_STRIP) for pc in _CONNECTOR_SPLIT.split(part)]
+        pieces = [pc for pc in pieces if pc]
+        if len(pieces) > 1 and all(len(pc.split()) >= 4 for pc in pieces):
+            subqueries.extend(pieces)
+        else:
+            subqueries.append(part)
+
+    # Dedupe + drop fragments too short to embed meaningfully
+    seen = set()
+    result: List[str] = []
+    for sq in subqueries:
+        key = sq.lower()
+        if len(sq) >= 8 and key not in seen:
+            seen.add(key)
+            result.append(sq)
+    return result or [query]
+
+
+def _merge_subquery_results(result_lists: List[List], top_k: int) -> List:
+    """
+    Interleave per-sub-query search results round-robin (best hit of each
+    sub-query first), deduplicating chunks, capped at ``top_k`` total.
+    """
+    merged: List = []
+    seen_keys = set()
+    rank = 0
+    while len(merged) < top_k and any(rank < len(lst) for lst in result_lists):
+        for lst in result_lists:
+            if rank < len(lst) and len(merged) < top_k:
+                r = lst[rank]
+                key = (r.chunk_id, r.text[:80])
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    merged.append(r)
+        rank += 1
+    return merged
+
+
 def _retrieve_context(
     query: str,
     top_k: int,
@@ -196,6 +265,7 @@ def _retrieve_context(
     """
     Synchronous context retrieval from ChromaDB.
     Uses article-range detection for ordinal queries,
+    decomposes compound questions into sub-queries,
     falls back to semantic search for general queries.
     Runs in executor to avoid blocking the event loop.
     """
@@ -214,13 +284,27 @@ def _retrieve_context(
                 c["_article_range"] = True
             return range_chunks
 
-    # --- Strategy 2: Standard semantic search ---
-    results = services.store.search(
-        query,
-        services.embedder,
-        k=top_k,
-        source_filter=source_filter,
-    )
+    # --- Strategy 2: Semantic search (with compound-question splitting) ---
+    subqueries = _split_subqueries(query)
+    if len(subqueries) > 1:
+        logger.info(
+            "Compound query split into %d sub-queries: %s",
+            len(subqueries), [sq[:60] for sq in subqueries],
+        )
+        result_lists = [
+            services.store.search(
+                sq, services.embedder, k=top_k, source_filter=source_filter
+            )
+            for sq in subqueries
+        ]
+        results = _merge_subquery_results(result_lists, top_k)
+    else:
+        results = services.store.search(
+            query,
+            services.embedder,
+            k=top_k,
+            source_filter=source_filter,
+        )
 
     context_chunks: List[Dict] = []
     total_chars = 0
