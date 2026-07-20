@@ -49,7 +49,45 @@ def _configure_logging() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def _configure_audit_logging() -> None:
+    """
+    Attach a rotating file handler to the KVKK access/audit logger so the
+    audit trail is actually persisted (not just emitted to stdout).
+
+    Controlled by ``settings.AUDIT_LOG_FILE``; set it to "" to disable.
+    """
+    if not settings.AUDIT_LOG_FILE:
+        return
+
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+
+    audit_logger = logging.getLogger("legal_rag.access")
+
+    # Avoid attaching duplicate handlers on reload / repeated imports.
+    if any(isinstance(h, RotatingFileHandler) for h in audit_logger.handlers):
+        return
+
+    log_path = Path(settings.AUDIT_LOG_FILE)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=settings.AUDIT_LOG_MAX_BYTES,
+        backupCount=settings.AUDIT_LOG_BACKUPS,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s │ %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    )
+    audit_logger.addHandler(handler)
+    audit_logger.setLevel(logging.INFO)
+    # Keep records flowing to stdout as well via the root logger.
+    audit_logger.propagate = True
+
+
 _configure_logging()
+_configure_audit_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +104,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     # Initialize all shared services
     services.initialize()
+
+    # Warn loudly if authentication is disabled — never ship this to prod.
+    if settings.auth_enabled:
+        logger.info("✓ API-key authentication ENABLED for sensitive endpoints")
+    else:
+        logger.warning(
+            "⚠ API-key authentication is DISABLED (API_KEY not set). "
+            "This is fine for local development but MUST be set in production."
+        )
 
     # Check Ollama connectivity
     llm_ok = await services.llm.health_check()
@@ -115,7 +162,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    # Credentials cannot be combined with a wildcard origin — the browser
+    # rejects "Access-Control-Allow-Origin: *" together with credentials.
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
@@ -125,10 +174,9 @@ app.add_middleware(
 # Audit / access log (KVKK — Legal data access trail)
 #
 # A separate logger ("legal_rag.access") emits one structured line
-# per request on sensitive endpoints.  Route this to a dedicated
-# file handler (or a SIEM sink) in your logging config:
-#
-#   logging.getLogger("legal_rag.access").addHandler(FileHandler("access.log"))
+# per request on sensitive endpoints.  It is wired to a rotating file
+# handler automatically by ``_configure_audit_logging()`` above
+# (see settings.AUDIT_LOG_FILE).  Point that at a SIEM sink in prod.
 #
 # Fields logged per request:
 #   event      — REQUEST | RESPONSE
